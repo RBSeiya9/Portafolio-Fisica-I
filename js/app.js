@@ -493,19 +493,19 @@ const DEFAULT_DB = {
     },
     {
       id: "pfile-2",
-      name: "guia_practica_mesa_fuerzas.pdf",
-      type: "application/pdf",
-      size: 285400,
+      name: "guia_practica_mesa_fuerzas.svg",
+      type: "image/svg+xml",
+      size: 18400,
       uploadDate: "2026-03-12",
-      data: ""
+      data: "assets/evidencias/dcl_plano_inclinado.svg"
     },
     {
       id: "pfile-3",
-      name: "informe_segunda_ley_newton.pdf",
-      type: "application/pdf",
-      size: 452100,
+      name: "informe_segunda_ley_newton.svg",
+      type: "image/svg+xml",
+      size: 21100,
       uploadDate: "2026-04-09",
-      data: ""
+      data: "assets/imagenes/mapa_vectores.svg"
     }
   ],
   workshops: [
@@ -1356,7 +1356,7 @@ function createAcademicCardHTML(card, section, topicId) {
   let imageBlock = "";
   if (hasImage) {
     imageBlock = `
-      <div class="card-media-wrap" onclick="openFileViewer('${escapeHTML(card.title || 'Imagen')}', 'image/jpeg', '${card.imageData}')">
+      <div class="card-media-wrap" onclick="openCardImageViewer('${escapeHTML(topicId)}', '${section}', '${escapeHTML(card.id)}')">
         <img src="${card.imageData}" alt="${escapeHTML(card.title || 'Evidencia')}" loading="lazy">
         <span class="card-media-overlay-zoom">🔍 Ampliar</span>
       </div>
@@ -1685,7 +1685,7 @@ function renderPracticasFilesList() {
 
     return `
       <div class="practice-file-card" id="pfile-el-${escapeHTML(f.id)}">
-        <div class="practice-file-thumb" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${f.data}')">
+        <div class="practice-file-thumb" onclick="openPracticeViewer('${escapeHTML(f.id)}')">
           <span class="file-type-pill ${isPdf ? 'pdf' : ''}">${isPdf ? 'PDF' : 'IMAGEN'}</span>
           ${isImage ? `
             <img src="${f.data || 'assets/imagenes/laboratorio_fotopuertas.svg'}" alt="${escapeHTML(f.name)}" loading="lazy">
@@ -1702,10 +1702,10 @@ function renderPracticasFilesList() {
           <span class="practice-file-meta">${formatBytes(f.size)} · ${escapeHTML(f.uploadDate || '2026-10-12')}</span>
 
           <div class="practice-file-actions">
-            <button class="btn btn-primary btn-sm" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${f.data}')">
+            <button class="btn btn-primary btn-sm" onclick="openPracticeViewer('${escapeHTML(f.id)}')">
               👁 Abrir
             </button>
-            <button class="btn btn-outline btn-sm" onclick="downloadFileDirectly('${escapeHTML(f.name)}', '${f.data}')">
+            <button class="btn btn-outline btn-sm" onclick="downloadPracticeFile('${escapeHTML(f.id)}')">
               ⬇ Descargar
             </button>
             <label class="btn btn-outline btn-sm file-input-label" title="Reemplazar archivo">
@@ -2120,29 +2120,31 @@ function openLearningModal(learnId = null) {
   document.getElementById("learningFormDifficulty").value = item.difficulty || "";
   document.getElementById("learningFormConcept").value = item.uncomprehendedConcept || "";
   document.getElementById("learningFormStrategy").value = item.strategyUsed || "";
-  document.getElementById("learningFormResources").value = item.helpfulResources || "";
-  document.getElementById("learningFormWhatILearned").value = item.whatILearned || "";
-  document.getElementById("learningFormHowIVerified").value = item.howIVerified || "";
+  const whatLearnedEl = document.getElementById("learningFormWhatLearned");
+  if (whatLearnedEl) whatLearnedEl.value = item.whatILearned || "";
+
+  const verificationEl = document.getElementById("learningFormVerification");
+  if (verificationEl) verificationEl.value = item.howIVerified || "";
+
   document.getElementById("learningFormReflection").value = item.personalReflection || "";
 
   // Guardado en tiempo real
   const fields = [
-    { id: "learningFormTitle", prop: "title" },
-    { id: "learningFormTopicSelect", prop: "topicId" },
-    { id: "learningFormDifficulty", prop: "difficulty" },
-    { id: "learningFormConcept", prop: "uncomprehendedConcept" },
-    { id: "learningFormStrategy", prop: "strategyUsed" },
-    { id: "learningFormResources", prop: "helpfulResources" },
-    { id: "learningFormWhatILearned", prop: "whatILearned" },
-    { id: "learningFormHowIVerified", prop: "howIVerified" },
-    { id: "learningFormReflection", prop: "personalReflection" }
+    { el: document.getElementById("learningFormTitle"), prop: "title" },
+    { el: document.getElementById("learningFormTopicSelect"), prop: "topicId" },
+    { el: document.getElementById("learningFormDifficulty"), prop: "difficulty" },
+    { el: document.getElementById("learningFormConcept"), prop: "uncomprehendedConcept" },
+    { el: document.getElementById("learningFormStrategy"), prop: "strategyUsed" },
+    { el: document.getElementById("learningFormResources"), prop: "helpfulResources" },
+    { el: whatLearnedEl, prop: "whatILearned" },
+    { el: verificationEl, prop: "howIVerified" },
+    { el: document.getElementById("learningFormReflection"), prop: "personalReflection" }
   ];
 
   fields.forEach(f => {
-    const el = document.getElementById(f.id);
-    if (el) {
-      el.oninput = () => {
-        item[f.prop] = el.value;
+    if (f.el) {
+      f.el.oninput = () => {
+        item[f.prop] = f.el.value;
         scheduleAutoSave();
       };
     }
@@ -2355,7 +2357,7 @@ function openItemViewerModal(type, itemId) {
 
 function confirmDelete(type, id, extra = null) {
   currentConfirmAction = { type, id, extra };
-  const promptEl = document.getElementById("confirmDialogPrompt");
+  const promptEl = document.getElementById("confirmModalMessage");
 
   const names = {
     topic: "este tema de estudio completo con todas sus secciones",
@@ -2454,6 +2456,48 @@ function openFileViewer(name, type, data) {
   }
 
   openModal("fileViewerModal");
+}
+
+function closeFileViewer() {
+  closeModal("fileViewerModal");
+}
+
+function closeConfirmDialog() {
+  closeModal("confirmModal");
+  currentConfirmAction = null;
+}
+
+function openCardImageViewer(topicId, section, cardId) {
+  const topic = appDB.topics.find(t => t.id === topicId);
+  if (!topic || !Array.isArray(topic[section])) return;
+  const card = topic[section].find(c => c.id === cardId);
+  if (!card || !card.imageData) {
+    showToast("No hay imagen adjunta en esta tarjeta.", "info");
+    return;
+  }
+  openFileViewer(card.title || "Evidencia Gráfica", "image/jpeg", card.imageData);
+}
+
+async function openPracticeViewer(fileId) {
+  const f = (appDB.practiceFiles || []).find(x => x.id === fileId);
+  if (!f) return;
+  let data = f.data;
+  if (!data && f.id) {
+    const fromStorage = await FileStorage.getFile(f.id);
+    if (fromStorage && fromStorage.data) data = fromStorage.data;
+  }
+  openFileViewer(f.name, f.type, data);
+}
+
+async function downloadPracticeFile(fileId) {
+  const f = (appDB.practiceFiles || []).find(x => x.id === fileId);
+  if (!f) return;
+  let data = f.data;
+  if (!data && f.id) {
+    const fromStorage = await FileStorage.getFile(f.id);
+    if (fromStorage && fromStorage.data) data = fromStorage.data;
+  }
+  downloadFileDirectly(f.name, data);
 }
 
 // ============================================================================
@@ -2705,17 +2749,25 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Modal Confirmación
-  document.getElementById("confirmCancelBtn")?.addEventListener("click", () => closeModal("confirmModal"));
-  document.getElementById("confirmExecuteBtn")?.addEventListener("click", executeDelete);
+  document.getElementById("confirmModalAcceptBtn")?.addEventListener("click", executeDelete);
+  document.getElementById("confirmModalCancelBtn")?.addEventListener("click", closeConfirmDialog);
 
   // Perfil de estudiante
   const openProfile = () => {
-    document.getElementById("profileName").value = appDB.profile.name || "";
-    document.getElementById("profileCareer").value = appDB.profile.career || "";
-    document.getElementById("profileUniversity").value = appDB.profile.university || "";
-    document.getElementById("profileTerm").value = appDB.profile.term || "";
-    document.getElementById("profileBio").value = appDB.profile.bio || "";
-    document.getElementById("profileGoals").value = appDB.profile.goals || "";
+    const nameEl = document.getElementById("inputStudentName");
+    const univEl = document.getElementById("inputUniversity");
+    const careerEl = document.getElementById("inputCareer");
+    const termEl = document.getElementById("inputSemester");
+    const bioEl = document.getElementById("inputPresentation");
+    const goalsEl = document.getElementById("inputObjectives");
+
+    if (nameEl) nameEl.value = appDB.profile.name || "";
+    if (univEl) univEl.value = appDB.profile.university || "";
+    if (careerEl) careerEl.value = appDB.profile.career || "";
+    if (termEl) termEl.value = appDB.profile.term || "";
+    if (bioEl) bioEl.value = appDB.profile.bio || "";
+    if (goalsEl) goalsEl.value = appDB.profile.goals || "";
+
     openModal("profileModal");
   };
 
@@ -2724,12 +2776,20 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("profileForm")?.addEventListener("submit", (e) => {
     e.preventDefault();
-    appDB.profile.name = document.getElementById("profileName").value;
-    appDB.profile.career = document.getElementById("profileCareer").value;
-    appDB.profile.university = document.getElementById("profileUniversity").value;
-    appDB.profile.term = document.getElementById("profileTerm").value;
-    appDB.profile.bio = document.getElementById("profileBio").value;
-    appDB.profile.goals = document.getElementById("profileGoals").value;
+    const nameEl = document.getElementById("inputStudentName");
+    const univEl = document.getElementById("inputUniversity");
+    const careerEl = document.getElementById("inputCareer");
+    const termEl = document.getElementById("inputSemester");
+    const bioEl = document.getElementById("inputPresentation");
+    const goalsEl = document.getElementById("inputObjectives");
+
+    if (nameEl) appDB.profile.name = nameEl.value;
+    if (univEl) appDB.profile.university = univEl.value;
+    if (careerEl) appDB.profile.career = careerEl.value;
+    if (termEl) appDB.profile.term = termEl.value;
+    if (bioEl) appDB.profile.bio = bioEl.value;
+    if (goalsEl) appDB.profile.goals = goalsEl.value;
+
     saveDatabase();
     updateProfileUI();
     closeModal("profileModal");
