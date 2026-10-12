@@ -140,6 +140,10 @@
         </div>
       </div>
       <div class="topbar-actions">
+        <div class="topbar-autosave saved" id="topbarAutosave" title="Estado de guardado en tiempo real">
+          <span class="autosave-dot" id="autosaveDot"></span>
+          <span class="autosave-text" id="autosaveText">Guardado</span>
+        </div>
         <button class="btn btn-outline btn-sm" id="topbarProfileBtn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
           <span class="hide-mobile">Datos del estudiante</span>
@@ -388,46 +392,68 @@
       </section>
 
       <!-- ========================================== -->
-      <!-- VISTA 3: PRÁCTICAS DE LABORATORIO         -->
+      <!-- VISTA 3: PRÁCTICAS DE LABORATORIO (ARCHIVOS) -->
       <!-- ========================================== -->
       <section class="view" id="view-practicas">
         <div class="section-block-header">
           <div>
-            <span class="section-tag">EXPERIMENTACIÓN</span>
+            <span class="section-tag">LABORATORIO Y EXPERIMENTACIÓN</span>
             <h2 class="section-title">Prácticas de Laboratorio</h2>
-            <p class="section-desc">Experiencias experimentales, hipótesis, montaje de instrumentos, toma de datos, cálculos y conclusiones.</p>
+            <p class="section-desc">Sube y consulta las fotos de tus prácticas de laboratorio, apuntes del cuaderno y guías en PDF.</p>
           </div>
-          <button class="btn btn-primary" id="btnOpenNewPracticeModal">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            Registrar nueva práctica
-          </button>
+          <div class="header-action-group">
+            <label class="btn btn-primary file-input-label">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              <span>＋ Subir Archivo</span>
+              <input type="file" id="practiceHeaderFileInput" accept=".pdf, image/*" multiple>
+            </label>
+          </div>
         </div>
 
-        <!-- Filtros y Búsqueda de Prácticas -->
+        <!-- Zona de Carga visible Drag & Drop -->
+        <div class="upload-dropzone" id="practiceDropzone">
+          <div class="dropzone-icon">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          </div>
+          <h3 class="dropzone-title">Arrastra y suelta aquí tus fotos o documentos PDF</h3>
+          <p class="dropzone-sub">Compatible con PDF, JPG, JPEG, PNG y WEBP. Se guardan automáticamente sin escribir formularios.</p>
+          <div class="dropzone-buttons">
+            <label class="btn btn-outline btn-sm file-input-label">
+              📷 Subir Fotografías / Imágenes
+              <input type="file" id="practiceImagesBtnInput" accept="image/png, image/jpeg, image/jpg, image/webp" multiple>
+            </label>
+            <label class="btn btn-outline btn-sm file-input-label">
+              📄 Subir Documentos PDF
+              <input type="file" id="practicePdfsBtnInput" accept="application/pdf" multiple>
+            </label>
+            <label class="btn btn-outline btn-sm file-input-label">
+              📎 Seleccionar Cualquier Archivo
+              <input type="file" id="practiceAnyBtnInput" accept=".pdf, image/*" multiple>
+            </label>
+          </div>
+        </div>
+
+        <!-- Barra de herramientas: Búsqueda y total de archivos -->
         <div class="topics-toolbar">
           <div class="search-field">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-            <input type="search" id="searchPracticesInput" placeholder="Buscar por título, objetivos o materiales...">
+            <input type="search" id="searchPracticesInput" placeholder="Buscar archivos por nombre...">
           </div>
-          <div class="filter-select-wrapper">
-            <label for="filterPracticeTopicSelect" class="sr-only">Filtrar por tema</label>
-            <select id="filterPracticeTopicSelect" class="styled-select">
-              <option value="all">Todos los temas</option>
-              <!-- Opciones dinámicas de temas -->
-            </select>
+          <div class="practice-counter-pill">
+            Archivos guardados: <strong id="practiceFilesTotalBadge">0</strong>
           </div>
         </div>
 
-        <!-- Grid de Prácticas -->
-        <div class="cards-activity-grid" id="practicesGrid">
-          <!-- Renderizado dinámico -->
+        <!-- Grid de Archivos de Prácticas -->
+        <div class="practice-files-grid" id="practiceFilesGrid">
+          <!-- Renderizado dinámico desde JS -->
         </div>
 
-        <div class="empty-state hidden" id="practicesEmptyState">
-          <div class="empty-icon">🧪</div>
-          <h3>No se encontraron prácticas</h3>
-          <p>No hay prácticas registradas que coincidan con los filtros seleccionados.</p>
-          <button class="btn btn-primary btn-sm" onclick="openPracticeModal()">Registrar primera práctica</button>
+        <!-- Estado vacío -->
+        <div class="empty-state hidden" id="practiceFilesEmptyState">
+          <div class="empty-icon">📁</div>
+          <h3>No has subido archivos de prácticas aún</h3>
+          <p>Arrastra una foto de tu cuaderno o un documento PDF en la zona superior para comenzar.</p>
         </div>
       </section>
 
@@ -768,203 +794,113 @@
     </div>
   </div>
 
-  <!-- 2. MODAL: AGREGAR / EDITAR DEFINICIÓN INDIVIDUAL -->
-  <div class="modal" id="definitionModal" role="dialog" aria-modal="true" aria-labelledby="defModalTitle">
+  <!-- 2. MODAL: TARJETA ACADÉMICA FLEXIBLE (DEFINICIONES, FÓRMULAS, METACOGNICIÓN, EVIDENCIAS) -->
+  <div class="modal" id="cardEditorModal" role="dialog" aria-modal="true" aria-labelledby="cardEditorModalTitle">
     <div class="modal-dialog modal-dialog-md">
       <div class="modal-content">
         <div class="modal-header">
           <div class="modal-header-title">
-            <span class="step-badge">📖</span>
-            <h3 id="defModalTitle">Definición de Concepto</h3>
+            <span class="step-badge" id="cardEditorModalIcon">📑</span>
+            <h3 id="cardEditorModalTitle">Editar Tarjeta</h3>
           </div>
-          <button class="modal-close-btn" onclick="closeModal('definitionModal')" aria-label="Cerrar">✕</button>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="modal-autosave-badge saved" id="cardEditorAutosaveStatus">✓ Guardado</span>
+            <button class="modal-close-btn" onclick="closeModal('cardEditorModal')" aria-label="Cerrar">✕</button>
+          </div>
         </div>
-        <form id="definitionForm" class="modal-form" novalidate>
-          <input type="hidden" id="defFormId">
-          <input type="hidden" id="defFormTopicId">
+
+        <form id="cardEditorForm" class="modal-form" novalidate onsubmit="event.preventDefault(); closeModal('cardEditorModal');">
+          <input type="hidden" id="cardEditorTopicId">
+          <input type="hidden" id="cardEditorSection">
+          <input type="hidden" id="cardEditorCardId">
+
           <div class="modal-body">
+            <!-- Título Opcional -->
             <div class="form-group">
-              <label for="defFormTopicSelect">Tema relacionado <span class="required">*</span></label>
-              <select id="defFormTopicSelect" required>
-                <!-- Opciones dinámicas -->
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="defFormTerm">Término o Concepto <span class="required">*</span></label>
-              <input type="text" id="defFormTerm" required placeholder="Ej. Aceleración Centrípeta">
-            </div>
-            <div class="form-group">
-              <label for="defFormDefinition">Definición Académica Rigurosa <span class="required">*</span></label>
-              <textarea id="defFormDefinition" rows="4" required placeholder="Explica con claridad y precisión el significado físico del concepto..."></textarea>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeModal('definitionModal')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btnSubmitDefForm">Guardar Definición</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <!-- 3. MODAL: AGREGAR / EDITAR FÓRMULA INDIVIDUAL (CON KATEX EN VIVO) -->
-  <div class="modal" id="formulaModal" role="dialog" aria-modal="true" aria-labelledby="formulaModalTitle">
-    <div class="modal-dialog modal-dialog-lg">
-      <div class="modal-content">
-        <div class="modal-header">
-          <div class="modal-header-title">
-            <span class="step-badge">𝚺</span>
-            <h3 id="formulaModalTitle">Fórmula y Modelo Matemático</h3>
-          </div>
-          <button class="modal-close-btn" onclick="closeModal('formulaModal')" aria-label="Cerrar">✕</button>
-        </div>
-        <form id="formulaForm" class="modal-form" novalidate>
-          <input type="hidden" id="formulaFormId">
-          <input type="hidden" id="formulaFormTopicId">
-          <div class="modal-body">
-            <div class="form-row form-row-2">
-              <div class="form-group">
-                <label for="formulaFormTopicSelect">Tema relacionado <span class="required">*</span></label>
-                <select id="formulaFormTopicSelect" required>
-                  <!-- Dinámico -->
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="formulaFormName">Nombre de la Ecuación / Ley <span class="required">*</span></label>
-                <input type="text" id="formulaFormName" required placeholder="Ej. Ecuación de Torricelli">
-              </div>
+              <label for="cardEditorTitle">
+                Título de la tarjeta <span class="text-muted" style="font-weight: normal; font-size: 12px;">(Opcional)</span>
+              </label>
+              <input type="text" id="cardEditorTitle" placeholder="Ej. Aceleración Centrípeta, DCL en Plano Inclinado, o dejar vacío...">
             </div>
 
-            <div class="form-group">
-              <label for="formulaFormLatex">Código LaTeX de la Fórmula <span class="required">*</span></label>
-              <input type="text" id="formulaFormLatex" required placeholder="Ej. v_f^2 = v_0^2 + 2 a \Delta x">
-              <span class="form-hint">Escribe la ecuación matemática en formato LaTeX estándar.</span>
-            </div>
-
-            <div class="form-group">
-              <label>Vista Previa KaTeX en Tiempo Real:</label>
-              <div class="katex-live-box" id="formulaFormKatexPreview">
-                <span class="text-muted">Escribe código LaTeX arriba para previsualizar aquí.</span>
+            <!-- Fórmulas LaTeX (visible únicamente si la sección es fórmulas) -->
+            <div class="form-group hidden" id="cardEditorFormulaGroup">
+              <label for="cardEditorLatex">
+                Expresión Matemática / Fórmula LaTeX <span class="text-muted" style="font-weight: normal; font-size: 12px;">(Opcional)</span>
+              </label>
+              <div class="formula-helper-tags">
+                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\vec{r} = x\\hat{i} + y\\hat{j}')">\vec{r}</button>
+                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\sum \\vec{F} = m \\vec{a}')">\sum F=ma</button>
+                <button type="button" class="formula-chip" onclick="insertLatexSnippet('v_f^2 = v_0^2 + 2a\\Delta x')">v_f^2</button>
+                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\Delta x')">\Delta x</button>
+                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\frac{a}{b}')">\frac{a}{b}</button>
+                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\sqrt{x}')">\sqrt{x}</button>
+                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\theta')">\theta</button>
+                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\mu_k')">\mu_k</button>
               </div>
-            </div>
-
-            <div class="form-row form-row-2">
-              <div class="form-group">
-                <label for="formulaFormVars">Significado de Variables y Unidades (SI)</label>
-                <textarea id="formulaFormVars" rows="3" placeholder="vf: velocidad final [m/s], v0: velocidad inicial [m/s], a: aceleración [m/s²], Δx: desplazamiento [m]"></textarea>
-              </div>
-              <div class="form-group">
-                <label for="formulaFormConditions">Condiciones de Aplicación y Validez</label>
-                <textarea id="formulaFormConditions" rows="3" placeholder="Aceleración constante en todo el intervalo analizado."></textarea>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="formulaFormExample">Ejemplo de Cálculo Numérico Resuelto</label>
-              <textarea id="formulaFormExample" rows="3" placeholder="Si v0 = 10 m/s, a = 2 m/s² y Δx = 24 m ⇒ vf² = 100 + 2(2)(24) = 196 ⇒ vf = 14 m/s."></textarea>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeModal('formulaModal')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btnSubmitFormulaForm">Guardar Fórmula</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <!-- 4. MODAL: AGREGAR / EDITAR PRÁCTICA INDIVIDUAL -->
-  <div class="modal" id="practiceModal" role="dialog" aria-modal="true" aria-labelledby="practiceModalTitle">
-    <div class="modal-dialog modal-dialog-lg">
-      <div class="modal-content">
-        <div class="modal-header">
-          <div class="modal-header-title">
-            <span class="step-badge">🧪</span>
-            <h3 id="practiceModalTitle">Práctica de Laboratorio</h3>
-          </div>
-          <button class="modal-close-btn" onclick="closeModal('practiceModal')" aria-label="Cerrar">✕</button>
-        </div>
-        <form id="practiceForm" class="modal-form" novalidate>
-          <input type="hidden" id="practiceFormId">
-          <div class="modal-body">
-            <div class="form-row form-row-3">
-              <div class="form-group span-2">
-                <label for="practiceFormTitle">Título de la Práctica <span class="required">*</span></label>
-                <input type="text" id="practiceFormTitle" required placeholder="Ej. Práctica 2: Caída Libre con Sensores Ópticos">
-              </div>
-              <div class="form-group">
-                <label for="practiceFormDate">Fecha de Realización</label>
-                <input type="date" id="practiceFormDate">
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="practiceFormTopicSelect">Tema Relacionado</label>
-              <select id="practiceFormTopicSelect">
-                <option value="">(Sin vincular a un tema específico)</option>
-                <!-- Dinámico -->
-              </select>
-            </div>
-
-            <div class="form-row form-row-2">
-              <div class="form-group">
-                <label for="practiceFormStatement">Enunciado / Pregunta Experimental</label>
-                <textarea id="practiceFormStatement" rows="3" placeholder="¿Cómo varía la rapidez de un móvil en función del tiempo?"></textarea>
-              </div>
-              <div class="form-group">
-                <label for="practiceFormObjectives">Objetivos de la Práctica <span class="required">*</span></label>
-                <textarea id="practiceFormObjectives" rows="3" required placeholder="• Determinar el valor experimental de la aceleración g..."></textarea>
-              </div>
-            </div>
-
-            <div class="form-row form-row-2">
-              <div class="form-group">
-                <label for="practiceFormMaterials">Materiales e Instrumentos Empleados</label>
-                <textarea id="practiceFormMaterials" rows="3" placeholder="Riel de aire, fotopuertas Pasco, compresor, masa de tracción..."></textarea>
-              </div>
-              <div class="form-group">
-                <label for="practiceFormData">Datos y Mediciones Registradas</label>
-                <textarea id="practiceFormData" rows="3" placeholder="Tabla de alturas y tiempos medidos en milisegundos..."></textarea>
-              </div>
-            </div>
-
-            <div class="form-row form-row-2">
-              <div class="form-group">
-                <label for="practiceFormProcedure">Procedimiento Experimental</label>
-                <textarea id="practiceFormProcedure" rows="3" placeholder="1. Calibrar sensores. 2. Nivelar la pista. 3. Soltar el móvil..."></textarea>
-              </div>
-              <div class="form-group">
-                <label for="practiceFormCalculations">Cálculos, Fórmulas y Análisis</label>
-                <textarea id="practiceFormCalculations" rows="3" placeholder="Regresión lineal h vs t², cálculo de pendiente m = ½ g..."></textarea>
-              </div>
-            </div>
-
-            <div class="form-row form-row-2">
-              <div class="form-group">
-                <label for="practiceFormResults">Resultados Obtenidos</label>
-                <textarea id="practiceFormResults" rows="2" placeholder="g = (9.78 ± 0.04) m/s² con error porcentual de 0.27%..."></textarea>
-              </div>
-              <div class="form-group">
-                <label for="practiceFormConclusions">Conclusiones</label>
-                <textarea id="practiceFormConclusions" rows="2" placeholder="Se comprobó el modelo MRUV para la caída libre en el vacío..."></textarea>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label>Evidencias Adjuntas (Fotografías del montaje / Informe PDF)</label>
-              <div class="file-uploader-box">
-                <input type="file" id="practiceFormFiles" multiple accept="image/*,.pdf" class="file-hidden-input">
-                <div class="uploader-prompt">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                  <span>Haz clic aquí para adjuntar fotos o documentos</span>
+              <input type="text" id="cardEditorLatex" placeholder="Ej. \vec{A} \cdot \vec{B} = |A||B|\cos(\theta)">
+              <div class="katex-live-box" style="margin-top: 8px;">
+                <span class="katex-preview-label">Previsualización matemática KaTeX:</span>
+                <div class="katex-preview-render" id="cardEditorLatexPreview">
+                  <span class="text-muted">Escribe código LaTeX arriba para previsualizar aquí en vivo.</span>
                 </div>
               </div>
-              <div id="practiceFormFilesPreview" class="attached-items-list"></div>
+            </div>
+
+            <!-- Texto / Contenido Opcional -->
+            <div class="form-group">
+              <label for="cardEditorText">
+                Contenido o Notas <span class="text-muted" style="font-weight: normal; font-size: 12px;">(Opcional)</span>
+              </label>
+              <textarea id="cardEditorText" rows="4" placeholder="Escribe tu definición, explicación, procedimiento, reflexiones o déjalo vacío si solo deseas una imagen..."></textarea>
+            </div>
+
+            <!-- Zona de Imagen Opcional (Permite agregar, cambiar o quitar imagen) -->
+            <div class="form-group">
+              <label>
+                Imagen o Fotografía <span class="text-muted" style="font-weight: normal; font-size: 12px;">(Opcional)</span>
+              </label>
+
+              <!-- Vista previa si ya tiene imagen -->
+              <div class="card-image-preview-area hidden" id="cardEditorImageCurrentWrap">
+                <div class="card-image-preview-thumb">
+                  <img id="cardEditorImageCurrentPreview" src="" alt="Previsualización">
+                </div>
+                <div class="card-image-preview-actions">
+                  <label class="btn btn-outline btn-sm file-input-label">
+                    🔄 Cambiar imagen
+                    <input type="file" id="cardEditorImageChangeInput" accept="image/png, image/jpeg, image/jpg, image/webp, image/svg+xml">
+                  </label>
+                  <button type="button" class="btn btn-danger-outline btn-sm" id="cardEditorRemoveImageBtn">
+                    🗑 Quitar imagen
+                  </button>
+                </div>
+              </div>
+
+              <!-- Selector si no tiene imagen -->
+              <div class="card-image-dropzone" id="cardEditorImageUploadWrap">
+                <label class="card-image-upload-box file-input-label">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                  <span>Hacer clic para adjuntar foto o imagen</span>
+                  <span class="sub-hint">PNG, JPG, JPEG, WEBP o SVG</span>
+                  <input type="file" id="cardEditorImageNewInput" accept="image/png, image/jpeg, image/jpg, image/webp, image/svg+xml">
+                </label>
+              </div>
+            </div>
+
+            <div class="autosave-help-notice">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Todos los cambios se guardan automáticamente en tiempo real.</span>
             </div>
           </div>
+
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeModal('practiceModal')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btnSubmitPracticeForm">Guardar Práctica</button>
+            <button type="button" class="btn btn-danger-outline" id="cardEditorDeleteBtn">
+              🗑 Eliminar tarjeta
+            </button>
+            <button type="button" class="btn btn-primary" onclick="closeModal('cardEditorModal')">
+              Listo ✓
+            </button>
           </div>
         </form>
       </div>
@@ -980,7 +916,10 @@
             <span class="step-badge">📝</span>
             <h3 id="workshopModalTitle">Taller y Ejercicios Resueltos</h3>
           </div>
-          <button class="modal-close-btn" onclick="closeModal('workshopModal')" aria-label="Cerrar">✕</button>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="modal-autosave-badge saved" id="workshopAutosaveStatus">✓ Guardado</span>
+            <button class="modal-close-btn" onclick="closeModal('workshopModal')" aria-label="Cerrar">✕</button>
+          </div>
         </div>
         <form id="workshopForm" class="modal-form" novalidate>
           <input type="hidden" id="workshopFormId">
@@ -1045,6 +984,11 @@
               </div>
               <div id="workshopFormFilesPreview" class="attached-items-list"></div>
             </div>
+
+            <div class="autosave-help-notice">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Los cambios se guardan automáticamente en tiempo real.</span>
+            </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline" onclick="closeModal('workshopModal')">Cancelar</button>
@@ -1064,7 +1008,10 @@
             <span class="step-badge">🎯</span>
             <h3 id="examModalTitle">Examen Parcial y Corrección</h3>
           </div>
-          <button class="modal-close-btn" onclick="closeModal('examModal')" aria-label="Cerrar">✕</button>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="modal-autosave-badge saved" id="examAutosaveStatus">✓ Guardado</span>
+            <button class="modal-close-btn" onclick="closeModal('examModal')" aria-label="Cerrar">✕</button>
+          </div>
         </div>
         <form id="examForm" class="modal-form" novalidate>
           <input type="hidden" id="examFormId">
@@ -1134,6 +1081,11 @@
               </div>
               <div id="examFormFilesPreview" class="attached-items-list"></div>
             </div>
+
+            <div class="autosave-help-notice">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Los cambios se guardan automáticamente en tiempo real.</span>
+            </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline" onclick="closeModal('examModal')">Cancelar</button>
@@ -1153,7 +1105,10 @@
             <span class="step-badge">✦</span>
             <h3 id="learningModalTitle">Situación de Aprendizaje y Metacognición</h3>
           </div>
-          <button class="modal-close-btn" onclick="closeModal('learningModal')" aria-label="Cerrar">✕</button>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="modal-autosave-badge saved" id="learningAutosaveStatus">✓ Guardado</span>
+            <button class="modal-close-btn" onclick="closeModal('learningModal')" aria-label="Cerrar">✕</button>
+          </div>
         </div>
         <form id="learningForm" class="modal-form" novalidate>
           <input type="hidden" id="learningFormId">

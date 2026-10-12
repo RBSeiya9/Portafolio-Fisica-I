@@ -1,108 +1,231 @@
 /**
  * ============================================================================
- * PORTAFOLIO DIGITAL DE FÍSICA I - APLICACIÓN PRINCIPAL
- * Lenguaje: JavaScript Puro (Vanilla JS, ECMAScript moderno)
- * Almacenamiento: LocalStorage (Persistencia local en navegador)
- * Notación Matemática: KaTeX (Renderizado de fórmulas LaTeX)
- * Arquitectura: Módulos independientes para Temas, Prácticas, Talleres,
- *               Parciales y Metacognición con edición individualizada.
+ * PORTAFOLIO DIGITAL DE FÍSICA I — MOTOR DE APLICACIÓN v3.5
+ * ============================================================================
+ * Características:
+ *  - Guardado automático en tiempo real en todos los apartados (debounced autosave).
+ *  - Integración nativa con IndexedDB (FileStorage) para almacenamiento local
+ *    persistente de imágenes de alta resolución y archivos PDF sin límites de cuota.
+ *  - Sección «Mis temas» simplificada: 4 pestañas exclusivas (Definiciones, Fórmulas,
+ *    Metacognición, Evidencias) con tarjetas totalmente flexibles (texto solo, imagen
+ *    sola, título+imagen, título+texto+imagen, etc.).
+ *  - Sección «Prácticas» simplificada al máximo: gestor de fotos y documentos PDF
+ *    con zona de carga drag & drop y botones directos, sin formularios tediosos.
+ *  - Módulos independientes de Talleres, Parciales y Mi Aprendizaje.
+ *  - Renderizado matemático KaTeX con previsualización en vivo.
+ *  - Importación y exportación de respaldos en formato JSON completo.
  * ============================================================================
  */
 
-// Clave principal de almacenamiento en LocalStorage (Base de datos versión 3)
+// Claves de almacenamiento
 const STORAGE_KEY_DB = "portafolio_fisica_db_v3";
 const LEGACY_STORAGE_KEY_TOPICS = "portafolio_fisica_topics_v2";
 const LEGACY_STORAGE_KEY_PROFILE = "portafolio_fisica_profile_v2";
 
-/**
- * Generador de identificadores únicos
- */
+// ============================================================================
+// ALMACENAMIENTO BINARIO CON INDEXEDDB (FileStorage)
+// Permite guardar imágenes y PDFs de cualquier tamaño sin saturar LocalStorage
+// ============================================================================
+const FileStorage = {
+  dbName: "PortafolioFisicaIDB",
+  dbVersion: 1,
+  storeName: "files",
+  _db: null,
+  _cache: new Map(), // Caché en memoria para acceso instantáneo
+
+  async init() {
+    if (this._db) return this._db;
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open(this.dbName, this.dbVersion);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(this.storeName)) {
+            db.createObjectStore(this.storeName, { keyPath: "id" });
+          }
+        };
+        req.onsuccess = (e) => {
+          this._db = e.target.result;
+          resolve(this._db);
+        };
+        req.onerror = (e) => {
+          console.warn("IndexedDB no disponible, usando fallback en memoria:", e);
+          resolve(null);
+        };
+      } catch (err) {
+        console.warn("Excepción al inicializar IndexedDB:", err);
+        resolve(null);
+      }
+    });
+  },
+
+  async saveFile(id, name, type, size, data) {
+    this._cache.set(id, data);
+    const db = await this.init();
+    if (!db) return true;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(this.storeName, "readwrite");
+        const store = tx.objectStore(this.storeName);
+        store.put({ id, name, type, size, data, updatedAt: Date.now() });
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  },
+
+  async getFile(id) {
+    if (this._cache.has(id)) return this._cache.get(id);
+    const db = await this.init();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(this.storeName, "readonly");
+        const store = tx.objectStore(this.storeName);
+        const req = store.get(id);
+        req.onsuccess = () => {
+          if (req.result && req.result.data) {
+            this._cache.set(id, req.result.data);
+            resolve(req.result.data);
+          } else {
+            resolve(null);
+          }
+        };
+        req.onerror = () => resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  },
+
+  async deleteFile(id) {
+    this._cache.delete(id);
+    const db = await this.init();
+    if (!db) return true;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(this.storeName, "readwrite");
+        const store = tx.objectStore(this.storeName);
+        store.delete(id);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  },
+
+  async getAllFiles() {
+    const db = await this.init();
+    if (!db) return [];
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(this.storeName, "readonly");
+        const store = tx.objectStore(this.storeName);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      } catch (e) {
+        resolve([]);
+      }
+    });
+  }
+};
+
+// ============================================================================
+// UTILIDADES GENERALES
+// ============================================================================
+
 function generateUniqueId(prefix = "id") {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 7)}`;
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 }
 
-/**
- * Sanitiza texto para evitar inyecciones HTML accidentales
- */
 function escapeHTML(str = "") {
-  return String(str)
+  if (typeof str !== "string") return "";
+  return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/'/g, "&#039;");
 }
 
-/**
- * Notificaciones Toast animadas en pantalla
- */
+function formatBytes(bytes) {
+  if (!bytes || isNaN(bytes)) return "0 KB";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / 1048576).toFixed(1) + " MB";
+}
+
 function showToast(message, type = "info") {
-  const container = document.getElementById("toastContainer");
-  if (!container) return;
+  let container = document.getElementById("toastContainer");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "toastContainer";
+    container.className = "toast-container";
+    document.body.appendChild(container);
+  }
 
   const toast = document.createElement("div");
-  toast.className = `toast ${type}`;
-  toast.textContent = message;
-
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <span class="toast-icon">${type === "success" ? "✓" : type === "error" ? "⚠️" : "ℹ"}</span>
+    <span class="toast-message">${escapeHTML(message)}</span>
+  `;
   container.appendChild(toast);
 
   setTimeout(() => {
-    toast.classList.add("hiding");
-    setTimeout(() => toast.remove(), 250);
+    toast.classList.add("fade-out");
+    setTimeout(() => toast.remove(), 300);
   }, 3200);
 }
 
-/**
- * Renderiza fórmulas LaTeX utilizando KaTeX de forma segura
- */
 function renderKaTeX(element) {
-  if (window.renderMathInElement && element) {
-    try {
-      window.renderMathInElement(element, {
-        delimiters: [
-          { left: "$$", right: "$$", display: true },
-          { left: "\\[", right: "\\]", display: true },
-          { left: "$", right: "$", display: false },
-          { left: "\\(", right: "\\)", display: false }
-        ],
-        throwOnError: false
-      });
-    } catch (e) {
-      console.warn("Error en KaTeX auto-render:", e);
-    }
+  if (!element || typeof renderMathInElement !== "function") return;
+  try {
+    renderMathInElement(element, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "$", right: "$", display: false },
+        { left: "\\(", right: "\\)", display: false },
+        { left: "\\[", right: "\\]", display: true }
+      ],
+      throwOnError: false
+    });
+  } catch (err) {
+    console.warn("KaTeX error:", err);
   }
 }
 
-/**
- * Formatea una expresión de LaTeX individual a HTML KaTeX
- */
 function formatLatex(latexCode, isDisplayMode = false) {
-  if (window.katex && latexCode) {
-    try {
-      return window.katex.renderToString(latexCode, {
-        displayMode: isDisplayMode,
-        throwOnError: false
-      });
-    } catch (e) {
-      return `<code class="fallback-math">${escapeHTML(latexCode)}</code>`;
-    }
+  if (!latexCode || !latexCode.trim()) return "";
+  if (typeof katex === "undefined") {
+    return `<code class="math-fallback">${escapeHTML(latexCode)}</code>`;
   }
-  return `<code class="fallback-math">${escapeHTML(latexCode || "")}</code>`;
+  try {
+    return katex.renderToString(latexCode.trim(), {
+      displayMode: isDisplayMode,
+      throwOnError: false
+    });
+  } catch (err) {
+    return `<code class="math-fallback">${escapeHTML(latexCode)}</code>`;
+  }
 }
 
 // ============================================================================
-// BASE DE DATOS INICIAL PREDETERMINADA (CONTENIDO ACADÉMICO MODELO)
+// BASE DE DATOS INICIAL PREDETERMINADA (CONTENIDOS ACADÉMICOS DE FÍSICA I)
 // ============================================================================
 
 const DEFAULT_DB = {
   profile: {
-    studentName: "Alejandro Morales Rivera",
-    university: "Universidad Nacional de Ingeniería",
+    name: "Alejandro Morales",
     career: "Ingeniería Mecánica",
-    professor: "Dr. Carlos E. Mendoza",
-    semester: "2026-I",
-    presentation: "Este portafolio digital organiza de forma continua y verificable todas las evidencias de aprendizaje, deducciones analíticas, prácticas de laboratorio, resolución de talleres y reflexiones críticas sobre dificultades del curso de Física I.",
-    objectives: "Consolidar los fundamentos conceptuales de la mecánica clásica newtoniana, desarrollar destrezas analíticas en resolución de problemas, verificar hipótesis experimentales en laboratorio y aplicar la metacognición para corregir errores sistemáticos en evaluaciones."
+    university: "Facultad de Ingeniería",
+    term: "2026-I",
+    bio: "Estudiante de ingeniería enfocado en mecánica clásica, modelado analítico y análisis experimental de sistemas físicos.",
+    goals: "Comprender a profundidad los modelos vectoriales y las leyes de movimiento, superando dificultades conceptuales mediante el análisis de errores y la verificación experimental."
   },
   topics: [
     {
@@ -112,255 +235,277 @@ const DEFAULT_DB = {
       description: "Representación geométrica y analítica, componentes rectangulares, vectores unitarios, producto punto y producto cruz en dos y tres dimensiones.",
       status: "Completado",
       estimatedHours: "18 horas",
-      conceptualScheme: "El álgebra vectorial constituye la base matemática indispensable de toda la mecánica clásica. Las leyes de Newton, la cinemática en dos dimensiones y el trabajo mecánico son conceptos intrínsecamente vectoriales.",
-      mapFile: {
-        name: "mapa_conceptual_vectores_2d.svg",
-        type: "image/svg+xml",
-        data: "assets/imagenes/mapa_vectores.svg"
-      },
       definitions: [
         {
-          id: "def-v1",
-          term: "Magnitud Escalar",
-          definition: "Aquella que queda completamente definida por un valor numérico y una unidad de medida (ej. masa, tiempo, temperatura, energía)."
+          id: "card-v-def1",
+          title: "Vector en el Espacio",
+          text: "Entidad geométrica y matemática definida por tres atributos indispensables: magnitud (módulo o longitud escalar), dirección (orientación angular en el espacio) y sentido. Se representa analíticamente como una tupla ordenada en ℝ³.",
+          imageData: null
         },
         {
-          id: "def-v2",
-          term: "Magnitud Vectorial",
-          definition: "Requiere módulo (magnitud), dirección espacial y sentido para su especificación completa (ej. desplazamiento, velocidad, aceleración, fuerza)."
+          id: "card-v-def2",
+          title: "Componentes Rectangulares",
+          text: "Proyecciones ortogonales de un vector sobre los ejes cartesianos: Ax = |A| cos(θ), Ay = |A| sin(θ). Permiten transformar el álgebra geométrica en sumas algebraicas directas.",
+          imageData: null
         },
         {
-          id: "def-v3",
-          term: "Vector Unitario",
-          definition: "Vector adimensional de magnitud exactamente igual a 1 (î, ĵ, k̂) empleado para especificar una dirección en el espacio cartesiano."
+          id: "card-v-def3",
+          title: "Vector Unitario (Versor)",
+          text: "Vector adimensional de módulo exactamente igual a 1, utilizado para especificar una dirección espacial: û = u / |u|. Los vectores canónicos en ℝ³ son î, ĵ, k̂.",
+          imageData: null
         },
         {
-          id: "def-v4",
-          term: "Producto Escalar (Punto)",
-          definition: "Operación algebraica entre dos vectores que produce un escalar: A · B = |A||B| cos(θ). Mide la proyección paralela de un vector sobre otro y define el trabajo mecánico."
+          id: "card-v-def4",
+          title: "Producto Escalar (Punto)",
+          text: "Operación binaria que produce un escalar: A · B = |A||B| cos(θ) = AxBx + AyBy + AzBz. Su valor es nulo si y sólo si los vectores son ortogonales.",
+          imageData: null
         },
         {
-          id: "def-v5",
-          term: "Producto Vectorial (Cruz)",
-          definition: "Operación entre vectores cuyo resultado es un tercer vector ortogonal al plano definido por los dos primeros: A × B = |A||B| sin(θ) n̂. Define magnitudes como torque y momento angular."
+          id: "card-v-def5",
+          title: "Producto Vectorial (Cruz)",
+          text: "Operación en ℝ³ que genera un vector perpendicular a ambos factores: |A × B| = |A||B| sin(θ). Su sentido sigue la regla de la mano derecha y su magnitud es el área del paralelogramo.",
+          imageData: null
         }
       ],
       formulas: [
         {
-          id: "form-v1",
-          name: "Componentes Rectangulares en 2D",
-          latex: "A_x = |\\vec{A}| \\cos(\\theta), \\quad A_y = |\\vec{A}| \\sin(\\theta)",
-          variables: "|\\vec{A}|: módulo del vector [m, N, m/s], \\theta: ángulo medido respecto al semieje positivo X.",
-          conditions: "Ángulo medido en sentido antihorario respecto al eje horizontal.",
-          example: "Para F = 50 N a 36.87°: Fx = 50 cos(36.87°) = 40 N; Fy = 50 sin(36.87°) = 30 N."
+          id: "card-v-form1",
+          title: "Módulo de un Vector en ℝ³",
+          latex: "|\\vec{A}| = \\sqrt{A_x^2 + A_y^2 + A_z^2}",
+          text: "El módulo representa la longitud euclidiana del vector. Es siempre no negativo y satisface la desigualdad triangular.",
+          imageData: null
         },
         {
-          id: "form-v2",
-          name: "Módulo y Dirección del Vector Resultante",
-          latex: "|\\vec{R}| = \\sqrt{R_x^2 + R_y^2 + R_z^2}, \\quad \\theta = \\arctan\\left(\\frac{R_y}{R_x}\\right)",
-          variables: "R_x, R_y, R_z: componentes cartesianas del vector suma.",
-          conditions: "Para el ángulo polar, se debe sumar 180° si Rx < 0 (cuadrantes II y III).",
-          example: "Si Rx = -4 m y Ry = 3 m, |R| = √(16+9) = 5 m; θ = arctan(3/-4) + 180° = 143.13°."
+          id: "card-v-form2",
+          title: "Descomposición Cartesiana 2D",
+          latex: "A_x = |\\vec{A}|\\cos\\theta, \\quad A_y = |\\vec{A}|\\sin\\theta, \\quad \\theta = \\arctan\\left(\\frac{A_y}{A_x}\\right)",
+          text: "Válido para un ángulo θ medido en sentido antihorario desde el semieje positivo X. Requiere verificar el cuadrante si Ax < 0.",
+          imageData: null
         },
         {
-          id: "form-v3",
-          name: "Producto Escalar (Producto Punto)",
-          latex: "\\vec{A} \\cdot \\vec{B} = |\\vec{A}||\\vec{B}| \\cos(\\phi) = A_x B_x + A_y B_y + A_z B_z",
-          variables: "\\phi: ángulo menor comprendido entre los vectores (0° ≤ \\phi ≤ 180°).",
-          conditions: "Si dos vectores no nulos tienen producto escalar igual a cero, son ortogonales (perpendiculares).",
-          example: "A = (2î + 3ĵ) N, B = (4î - 1ĵ) m ⇒ W = 2(4) + 3(-1) = 5 J de trabajo."
+          id: "card-v-form3",
+          title: "Producto Escalar y Ángulo Relativo",
+          latex: "\\vec{A} \\cdot \\vec{B} = |\\vec{A}||\\vec{B}|\\cos\\theta = A_x B_x + A_y B_y + A_z B_z",
+          text: "Permite despejar el ángulo relativo entre cualquier par de fuerzas o desplazamientos tridimensionales: cos(θ) = (A · B) / (|A||B|).",
+          imageData: null
         },
         {
-          id: "form-v4",
-          name: "Producto Vectorial (Producto Cruz)",
-          latex: "\\vec{A} \\times \\vec{B} = \\left(A_y B_z - A_z B_y\\right)\\hat{i} + \\left(A_z B_x - A_x B_z\\right)\\hat{j} + \\left(A_x B_y - A_y B_x\\right)\\hat{k}",
-          variables: "Resultado: vector perpendicular al plano AB con sentido dado por la regla de la mano derecha.",
-          conditions: "Operación anticonmutativa: A × B = -(B × A). Si A y B son paralelos, su producto cruz es nulo.",
-          example: "Torque: τ = r × F. Para r = (0.5î) m y F = (20ĵ) N ⇒ τ = 10 k̂ N·m."
+          id: "card-v-form4",
+          title: "Proyección Ortogonal de A sobre B",
+          latex: "\\text{Proy}_{\\vec{B}}(\\vec{A}) = \\frac{\\vec{A} \\cdot \\vec{B}}{|\\vec{B}|}",
+          text: "Componente escalar de A que actúa en la dirección exacta de la línea de acción de B.",
+          imageData: null
         }
       ],
-      files: []
+      metacognition: [
+        {
+          id: "card-v-meta1",
+          title: "Dificultad de Cuadrantes en la Calculadora",
+          text: "Al calcular el ángulo polar con arctan(Ay/Ax), la calculadora siempre devuelve valores entre -90° y +90°. Aprendí que si la componente Ax es negativa (cuadrantes II y III), debo sumar siempre 180° para obtener el ángulo polar verdadero desde el eje +X.",
+          imageData: null
+        },
+        {
+          id: "card-v-meta2",
+          title: "Visualización Espacial en 3D",
+          text: "Dibujar una caja paralelepípeda alrededor del vector ayuda a identificar los cosenos directores y evitar confusiones en los signos de las componentes k̂.",
+          imageData: null
+        }
+      ],
+      evidencias: [
+        {
+          id: "card-v-evi1",
+          title: "Esquema Conceptual de Álgebra Vectorial en 2D",
+          text: "Esquema analítico con descomposiciones cartesianas, cálculo de módulo por Pitágoras y regla del paralelogramo.",
+          imageData: "assets/imagenes/mapa_vectores.svg",
+          imageName: "mapa_vectores.svg"
+        }
+      ]
     },
     {
       id: "tema-cinematica",
       order: 2,
       title: "Cinemática en Una y Dos Dimensiones",
-      description: "Estudio de las leyes geométricas del movimiento sin considerar las causas: MRU, MRUV, caída libre vertical y movimiento de proyectiles (tiro parabólico).",
-      status: "En progreso",
-      estimatedHours: "24 horas",
-      conceptualScheme: "La cinemática describe la posición, velocidad y aceleración de partículas respecto a sistemas de referencia inerciales, sirviendo de puente con la dinámica newtoniana.",
-      mapFile: null,
+      description: "Posición, desplazamiento, velocidad instantánea, aceleración, MRU, MRUV, caída libre y movimiento parabólico de proyectiles.",
+      status: "Completado",
+      estimatedHours: "22 horas",
       definitions: [
         {
-          id: "def-c1",
-          term: "Sistema de Referencia",
-          definition: "Marco coordenado respecto al cual se miden el tiempo y las coordenadas espaciales de una partícula."
+          id: "card-c-def1",
+          title: "Posición",
+          text: "Vector r(t) trazado desde el origen del marco de referencia hasta la ubicación puntual de la partícula en el instante t.",
+          imageData: null
         },
         {
-          id: "def-c2",
-          term: "Desplazamiento",
-          definition: "Vector que une la posición inicial con la posición final: Δr = r(t₂) - r(t₁). Es independiente de la trayectoria recorrida."
+          id: "card-c-def2",
+          title: "Desplazamiento",
+          text: "Vector que une la posición inicial con la final: Δr = r(t₂) - r(t₁). Es estrictamente independiente de la trayectoria recorrida.",
+          imageData: null
         },
         {
-          id: "def-c3",
-          term: "Velocidad Instantánea",
-          definition: "Derivada temporal de la posición: v = dr/dt. Es un vector tangente a la trayectoria en cada instante."
+          id: "card-c-def3",
+          title: "Velocidad Instantánea",
+          text: "Derivada temporal del vector posición: v = dr/dt. Es un vector tangente a la trayectoria en cada instante.",
+          imageData: null
         },
         {
-          id: "def-c4",
-          term: "Aceleración",
-          definition: "Tasa de cambio de la velocidad respecto al tiempo: a = dv/dt = d²r/dt²."
+          id: "card-c-def4",
+          title: "Aceleración",
+          text: "Tasa de cambio de la velocidad respecto al tiempo: a = dv/dt = d²r/dt².",
+          imageData: null
         },
         {
-          id: "def-c5",
-          term: "Tiro Parabólico",
-          definition: "Superposición de dos movimientos independientes: MRU uniforme horizontal y MRUV acelerado vertical bajo la gravedad g."
+          id: "card-c-def5",
+          title: "Tiro Parabólico",
+          text: "Superposición de dos movimientos independientes: MRU uniforme horizontal y MRUV acelerado vertical bajo la gravedad g.",
+          imageData: null
         }
       ],
       formulas: [
         {
-          id: "form-c1",
-          name: "Ecuación de Posición en MRUV",
+          id: "card-c-form1",
+          title: "Ecuación de Posición en MRUV",
           latex: "x(t) = x_0 + v_0 t + \\frac{1}{2} a t^2",
-          variables: "x_0: posición inicial [m], v_0: rapidez inicial [m/s], a: aceleración constante [m/s²], t: tiempo [s].",
-          conditions: "Válida únicamente cuando la aceleración 'a' se mantiene constante.",
-          example: "x₀ = 5 m, v₀ = 2 m/s, a = 3 m/s² a los t = 4 s ⇒ x(4) = 5 + 2(4) + 0.5(3)(16) = 37 m."
+          text: "Válida únicamente cuando la aceleración 'a' se mantiene constante.",
+          imageData: null
         },
         {
-          id: "form-c2",
-          name: "Ecuación de Torricelli",
+          id: "card-c-form2",
+          title: "Ecuación de Torricelli",
           latex: "v_f^2 = v_0^2 + 2 a \\Delta x",
-          variables: "v_f: velocidad final, v_0: velocidad inicial, a: aceleración, \\Delta x: desplazamiento.",
-          conditions: "Aceleración constante; útil cuando no se conoce el tiempo.",
-          example: "Frenado de 20 m/s a 0 con a = -5 m/s² ⇒ 0 = 400 - 10 Δx ⇒ Δx = 40 m de distancia de frenado."
+          text: "Aceleración constante; permite calcular la rapidez sin conocer el tiempo transcurrido.",
+          imageData: null
         },
         {
-          id: "form-c3",
-          name: "Tiro Parabólico Paramétrico",
+          id: "card-c-form3",
+          title: "Tiro Parabólico Paramétrico",
           latex: "x(t) = (v_0 \\cos\\theta) t, \\quad y(t) = y_0 + (v_0 \\sin\\theta) t - \\frac{1}{2} g t^2",
-          variables: "\\theta: ángulo de elevación inicial, g: 9.8 m/s², y_0: altura inicial.",
-          conditions: "Despreciando resistencia del aire con gravedad uniforme.",
-          example: "v₀ = 30 m/s a 45°: v₀x = 21.21 m/s, v₀y = 21.21 m/s. Altura máxima en t = 2.16 s."
+          text: "Despreciando resistencia del aire con aceleración uniforme de gravedad g = 9.8 m/s².",
+          imageData: null
         }
       ],
-      files: []
+      metacognition: [
+        {
+          id: "card-c-meta1",
+          title: "Convención de Signos en Tiro Parabólico",
+          text: "Confundía el signo de la velocidad con el signo de la aceleración g. Aprendí a fijar desde el primer renglón: 'Eje vertical positivo hacia arriba, por ende a_y = -9.8 m/s² constante en todo el vuelo, incluso en el punto de altura máxima'.",
+          imageData: null
+        }
+      ],
+      evidencias: [
+        {
+          id: "card-c-evi1",
+          title: "Corrección de Parcial: Proyectil con Desnivel",
+          text: "Demostración gráfica de por qué la fórmula simplificada de alcance horizontal no aplica cuando el proyectil se lanza desde un acantilado.",
+          imageData: "assets/evidencias/correccion_parcial_tiro.svg",
+          imageName: "correccion_parcial_tiro.svg"
+        }
+      ]
     },
     {
       id: "tema-newton",
       order: 3,
       title: "Leyes de Newton y Dinámica Clásica",
-      description: "Causas del movimiento: Primera, Segunda y Tercera Ley de Newton, diagramas de cuerpo libre (DCL), fuerzas de fricción estática y cinética, y aplicaciones a sistemas acoplados.",
+      description: "Causas del movimiento: Primera, Segunda y Tercera Ley de Newton, diagramas de cuerpo libre (DCL), fricción estática y cinética, y sistemas acoplados.",
       status: "En progreso",
       estimatedHours: "26 horas",
-      conceptualScheme: "Las leyes de Newton son el núcleo de la física clásica. Permiten predecir la aceleración cinemática de cualquier cuerpo conociendo las fuerzas de interacción que experimenta.",
-      mapFile: null,
       definitions: [
         {
-          id: "def-n1",
-          term: "Primera Ley (Inercia)",
-          definition: "Todo cuerpo continúa en reposo o movimiento rectilíneo uniforme a menos que una fuerza neta no nula actúe sobre él."
+          id: "card-n-def1",
+          title: "Primera Ley (Inercia)",
+          text: "Todo cuerpo continúa en su estado de reposo o de movimiento rectilíneo uniforme a menos que una fuerza neta no nula actúe sobre él.",
+          imageData: null
         },
         {
-          id: "def-n2",
-          term: "Segunda Ley (Dinámica)",
-          definition: "La aceleración de un cuerpo es directamente proporcional a la fuerza neta aplicada e inversamente proporcional a su masa: ΣF = m a."
+          id: "card-n-def2",
+          title: "Segunda Ley (Dinámica)",
+          text: "La aceleración de un cuerpo es directamente proporcional a la fuerza neta aplicada e inversamente proporcional a su masa: ΣF = m a.",
+          imageData: null
         },
         {
-          id: "def-n3",
-          term: "Tercera Ley (Acción y Reacción)",
-          definition: "Las fuerzas siempre aparecen en pares opuestos de igual magnitud que actúan sobre cuerpos distintos: F_AB = -F_BA."
+          id: "card-n-def3",
+          title: "Tercera Ley (Acción y Reacción)",
+          text: "Las fuerzas de interacción siempre aparecen en pares opuestos de igual magnitud que actúan sobre cuerpos distintos: F_AB = -F_BA.",
+          imageData: null
         },
         {
-          id: "def-n4",
-          term: "Fuerza Normal",
-          definition: "Fuerza de contacto perpendicular a la superficie de apoyo generada por la repulsión electromagnética microscópica."
+          id: "card-n-def4",
+          title: "Fuerza Normal",
+          text: "Fuerza de contacto perpendicular a la superficie de apoyo generada por la repulsión electromagnética microscópica entre átomos.",
+          imageData: null
         },
         {
-          id: "def-n5",
-          term: "Fricción de Coulomb",
-          definition: "Resistencia al deslizamiento tangencial entre superficies secas: estática máxima fs = μs N y cinética fk = μk N."
+          id: "card-n-def5",
+          title: "Fricción de Coulomb",
+          text: "Resistencia tangencial al movimiento entre superficies secas: estática máxima fs = μs N y cinética fk = μk N.",
+          imageData: null
         }
       ],
       formulas: [
         {
-          id: "form-n1",
-          name: "Segunda Ley de Newton",
+          id: "card-n-form1",
+          title: "Segunda Ley de Newton",
           latex: "\\sum \\vec{F} = m \\vec{a} \\iff \\sum F_x = m a_x, \\quad \\sum F_y = m a_y",
-          variables: "m: masa inercial [kg], \\vec{a}: aceleración [m/s²], \\sum\\vec{F}: fuerza neta [N].",
-          conditions: "Marco de referencia inercial; masa constante.",
-          example: "Fuerza neta de 30 N sobre masa de 6 kg ⇒ a = 30 / 6 = 5 m/s²."
+          text: "Válida en marcos de referencia inerciales con masa inercial m constante.",
+          imageData: null
         },
         {
-          id: "form-n2",
-          name: "Leyes de Fricción",
+          id: "card-n-form2",
+          title: "Leyes de Fricción",
           latex: "f_{s,\\max} = \\mu_s N, \\quad f_k = \\mu_k N",
-          variables: "\\mu_s: coeficiente estático, \\mu_k: coeficiente cinético, N: fuerza normal.",
-          conditions: "\\mu_s > \\mu_k; independiente del área de contacto aparente.",
-          example: "Masa de 10 kg con μk = 0.2 en plano horizontal ⇒ N = 98 N ⇒ fk = 19.6 N."
+          text: "El coeficiente estático es mayor que el cinético (μs > μk) e independiente del área aparente de contacto.",
+          imageData: null
         },
         {
-          id: "form-n3",
-          name: "Plano Inclinado con Ángulo θ",
+          id: "card-n-form3",
+          title: "Plano Inclinado con Ángulo θ",
           latex: "N = m g \\cos\\theta, \\quad \\sum F_{\\parallel} = m g \\sin\\theta - f_k = m a",
-          variables: "\\theta: ángulo del plano con la horizontal, g: 9.8 m/s².",
-          conditions: "Eje coordenado paralelo al plano.",
-          example: "Plano a 30° sin fricción: a = g sin(30°) = 4.9 m/s² independientemente de la masa."
+          text: "Ejes coordenados rotados: paralelo al plano y perpendicular al plano.",
+          imageData: null
         }
       ],
-      files: []
-    }
-  ],
-  practices: [
-    {
-      id: "prac-v1",
-      topicId: "tema-vectores",
-      title: "Práctica 1: Mesa de Fuerzas y Equilibrio Vectorial",
-      date: "2026-03-12",
-      statement: "Determinar experimentalmente la fuerza equilibrante de un sistema de dos fuerzas concurrentes y comparar el resultado analítico por componentes con el método experimental.",
-      objectives: "• Comprobar experimentalmente la condición de equilibrio estático de traslación (ΣF = 0).\n• Determinar la magnitud y dirección polar de la fuerza equilibrante.",
-      materials: "Mesa de fuerzas circular graduada en 360°, aro central con hilos, juego de masas calibradas (50g, 100g, 200g), poleas de baja fricción y nivel de burbuja.",
-      data: "• Fuerza 1: m₁ = 150 g (F₁ = 1.47 N) en θ₁ = 30°\n• Fuerza 2: m₂ = 200 g (F₂ = 1.96 N) en θ₂ = 120°\n• Fuerza Equilibrante experimental medida: m_eq = 275 g (F_eq = 2.70 N) en θ_eq = 262°",
-      procedure: "1. Nivelar la mesa de fuerzas con nivel de burbuja.\n2. Colocar las poleas en las posiciones angulares asignadas.\n3. Añadir masas a los portamasas hasta que el anillo central quede concéntrico.\n4. Ajustar la tercera polea hasta lograr equilibrio completo sin rozar el perno.",
-      calculations: "Rx = 1.47 cos(30°) + 1.96 cos(120°) = 1.273 - 0.980 = 0.293 N\nRy = 1.47 sin(30°) + 1.96 sin(120°) = 0.735 + 1.697 = 2.432 N\n|R| = √(0.293² + 2.432²) = 2.450 N; θ = 83.13°\nFuerza Equilibrante Teórica: F_eq = 2.450 N en θ_eq = 263.13°\nError porcentual: |(2.70 - 2.45) / 2.45| · 100% = 1.02%",
-      results: "La fuerza equilibrante experimental coincidió con el modelo analítico con una discrepancia de apenas 1.02%.",
-      conclusions: "Se validó la suma vectorial por descomposición cartesiana. La fricción en poleas representó la principal fuente de error.",
-      files: []
-    },
-    {
-      id: "prac-c1",
-      topicId: "tema-cinematica",
-      title: "Práctica 2: Medición Experimental de la Aceleración de la Gravedad",
-      date: "2026-03-26",
-      statement: "Determinar el valor local de la aceleración gravitacional 'g' mediante caída libre empleando una esfera metálica y fotopuertas sincronizadas.",
-      objectives: "• Determinar el valor experimental de 'g' con su incertidumbre.\n• Analizar gráficamente la relación cuadrática entre altura de caída y tiempo.",
-      materials: "Columna graduada vertical de 2 m, electroimán de liberación, esfera de acero de 20 mm, dos fotopuertas Pasco y cronómetro digital de milisegundos.",
-      data: "• Altura h₁ = 0.50 m: t = 0.319 s\n• Altura h₂ = 1.00 m: t = 0.452 s\n• Altura h₃ = 1.50 m: t = 0.553 s\n• Altura h₄ = 1.80 m: t = 0.606 s",
-      procedure: "1. Nivelar la columna vertical con plomada.\n2. Fijar la fotopuerta inferior a distintas alturas sucesivas.\n3. Activar el electroimán para liberar la esfera desde el reposo.\n4. Registrar 5 repeticiones de tiempo para cada altura.",
-      calculations: "Ajuste de h = ½ g t² mediante regresión lineal h vs t²:\nPendiente m = 4.89 m/s² ⇒ g_exp = 2(4.89) = 9.78 m/s²\nIncertidumbre relativa: |(9.78 - 9.806) / 9.806| · 100% = 0.27%",
-      results: "El valor obtenido para la aceleración de la gravedad fue g = (9.78 ± 0.04) m/s².",
-      conclusions: "Se verificó la naturaleza uniformemente acelerada de la caída libre con precisión superior al 99.7%.",
-      files: [
+      metacognition: [
         {
-          name: "montaje_experimental_fotopuertas.svg",
-          type: "image/svg+xml",
-          data: "assets/imagenes/laboratorio_fotopuertas.svg"
+          id: "card-n-meta1",
+          title: "Construcción Rigurosa del Diagrama de Cuerpo Libre (DCL)",
+          text: "Omitía la normal en planos inclinados o dibujaba fuerzas ficticias. Aprendí la regla de oro: una fuerza sólo existe si hay un agente físico real en contacto con el cuerpo (o gravedad a distancia). Si no hay contacto, no hay fuerza.",
+          imageData: null
+        }
+      ],
+      evidencias: [
+        {
+          id: "card-n-evi1",
+          title: "Diagrama de Cuerpo Libre en Plano Inclinado",
+          text: "Descomposición del peso en componentes paralela y normal, con fuerza de fricción cinética opuesta al deslizamiento.",
+          imageData: "assets/evidencias/dcl_plano_inclinado.svg",
+          imageName: "dcl_plano_inclinado.svg"
         }
       ]
+    }
+  ],
+  practiceFiles: [
+    {
+      id: "pfile-1",
+      name: "montaje_experimental_fotopuertas.svg",
+      type: "image/svg+xml",
+      size: 14250,
+      uploadDate: "2026-03-26",
+      data: "assets/imagenes/laboratorio_fotopuertas.svg"
     },
     {
-      id: "prac-n1",
-      topicId: "tema-newton",
-      title: "Práctica 3: Verificación de la Segunda Ley de Newton con Carro Dinámico",
-      date: "2026-04-09",
-      statement: "Validar experimentalmente la relación proporcional entre la aceleración y la fuerza neta aceleradora manteniendo la masa total del sistema constante.",
-      objectives: "• Demostrar que a ∝ F_neta para masa inercial constante.\n• Determinar la masa inercial del sistema a partir de la pendiente F vs a.",
-      materials: "Pista de aluminio de baja fricción, carro dinámico con reflector, sensor de movimiento por ultrasonido Pasco, masas calibradas y polea ligera.",
-      data: "• Masa total del sistema: M_total = 0.650 kg\n• Ensayo 1: m_cuelga = 0.020 kg ⇒ F = 0.196 N, a = 0.301 m/s²\n• Ensayo 2: m_cuelga = 0.040 kg ⇒ F = 0.392 N, a = 0.605 m/s²\n• Ensayo 3: m_cuelga = 0.060 kg ⇒ F = 0.588 N, a = 0.898 m/s²",
-      procedure: "1. Calibrar sensor ultrasónico y nivelar el carril.\n2. Transferir masas del carro al portamasas para variar la fuerza neta sin variar la masa total.\n3. Medir la aceleración con el software Pasco en 5 repeticiones por masa.",
-      calculations: "Regresión lineal de F = M_exp · a:\nPendiente M_exp = 0.654 kg\nComparación con la masa medida en balanza (0.650 kg):\nError relativo: |(0.654 - 0.650) / 0.650| · 100% = 0.61%",
-      results: "La gráfica F vs a exhibió una relación estrictamente lineal con coeficiente de determinación R² = 0.9994.",
-      conclusions: "La Segunda Ley de Newton fue comprobada experimentalmente con un margen de discrepancia inferior al 1%.",
-      files: []
+      id: "pfile-2",
+      name: "guia_practica_mesa_fuerzas.pdf",
+      type: "application/pdf",
+      size: 285400,
+      uploadDate: "2026-03-12",
+      data: ""
+    },
+    {
+      id: "pfile-3",
+      name: "informe_segunda_ley_newton.pdf",
+      type: "application/pdf",
+      size: 452100,
+      uploadDate: "2026-04-09",
+      data: ""
     }
   ],
   workshops: [
@@ -371,9 +516,9 @@ const DEFAULT_DB = {
       date: "2026-03-18",
       statement: "Dadas dos fuerzas coplanares F₁ = (40î - 20ĵ + 10k̂) N y F₂ = (-15î + 30ĵ + 25k̂) N aplicadas en el origen, determine el ángulo entre ambas fuerzas y la componente proyectada de F₁ sobre la línea de acción de F₂.",
       formulas: "\\vec{F}_1 \\cdot \\vec{F}_2 = |\\vec{F}_1||\\vec{F}_2| \\cos(\\phi), \\quad \\text{Proy}_{F_2}(F_1) = \\frac{\\vec{F}_1 \\cdot \\vec{F}_2}{|\\vec{F}_2|}",
-      stepByStep: "Paso 1: Módulos individuales:\n|F₁| = √(40² + (-20)² + 10²) = √2100 = 45.83 N\n|F₂| = √((-15)² + 30² + 25²) = √1750 = 41.83 N\n\nPaso 2: Producto escalar por componentes:\nF₁ · F₂ = (40)(-15) + (-20)(30) + (10)(25) = -600 - 600 + 250 = -950 N²\n\nPaso 3: Ángulo entre vectores:\ncos(φ) = (-950) / (45.83 × 41.83) = -0.4955 ⇒ φ = 119.70°\n\nPaso 4: Proyección escalar:\nProy = -950 / 41.83 = -22.71 N",
+      stepByStep: "Paso 1: Módulos individuales:\n|F₁| = √(40² + (-20)² + 10²) = 45.83 N\n|F₂| = √((-15)² + 30² + 25²) = 41.83 N\n\nPaso 2: Producto escalar por componentes:\nF₁ · F₂ = (40)(-15) + (-20)(30) + (10)(25) = -950 N²\n\nPaso 3: Ángulo entre vectores:\ncos(φ) = (-950) / (45.83 × 41.83) = -0.4955 ⇒ φ = 119.70°\n\nPaso 4: Proyección escalar:\nProy = -950 / 41.83 = -22.71 N",
       finalAnswer: "Ángulo φ = 119.70° (obtuso). Proyección escalar de F₁ sobre F₂ = -22.71 N.",
-      verification: "Comprobación geométrica: Proy = |F₁| cos(φ) = 45.83 × cos(119.70°) = -22.71 N (coincidencia analítica exacta).",
+      verification: "Comprobación geométrica: Proy = |F₁| cos(φ) = 45.83 × cos(119.70°) = -22.71 N.",
       reflection: "El producto escalar simplifica enormemente el cálculo de proyecciones espaciales sin recurrir a geometría tridimensional compleja.",
       files: []
     },
@@ -384,9 +529,9 @@ const DEFAULT_DB = {
       date: "2026-04-02",
       statement: "Dos vehículos A y B parten simultáneamente de dos puntos separados 600 metros viajando en sentidos opuestos. El móvil A parte del reposo acelerando a 2 m/s². El móvil B viaja hacia A con velocidad constante de 15 m/s. Halle el tiempo y la posición de encuentro.",
       formulas: "x_A(t) = \\frac{1}{2} a_A t^2, \\quad x_B(t) = 600 - v_B t",
-      stepByStep: "Paso 1: Ecuaciones horarias con origen en A:\nxA(t) = ½(2) t² = t²\nxB(t) = 600 - 15 t\n\nPaso 2: Condición de encuentro xA = xB:\nt² = 600 - 15 t ⇒ t² + 15 t - 600 = 0\n\nPaso 3: Fórmula cuadrática:\nt = [-15 ± √(225 + 2400)] / 2 = [-15 + 51.23] / 2 = 18.12 segundos\n\nPaso 4: Posición del encuentro:\nxA(18.12) = (18.12)² = 328.33 metros desde el origen.",
-      finalAnswer: "Tiempo de encuentro t = 18.12 s; Posición x = 328.33 m desde el punto de partida de A.",
-      verification: "Comprobación con móvil B: xB(18.12) = 600 - 15(18.12) = 600 - 271.8 = 328.2 m.",
+      stepByStep: "Paso 1: Ecuaciones horarias con origen en A:\nxA(t) = t²\nxB(t) = 600 - 15 t\n\nPaso 2: Condición de encuentro xA = xB:\nt² + 15 t - 600 = 0\n\nPaso 3: Fórmula cuadrática:\nt = [-15 + √(225 + 2400)] / 2 = 18.12 segundos\n\nPaso 4: Posición:\nxA(18.12) = 328.33 metros desde el punto de partida de A.",
+      finalAnswer: "Tiempo de encuentro t = 18.12 s; Posición x = 328.33 m.",
+      verification: "Comprobación con móvil B: xB(18.12) = 600 - 15(18.12) = 328.2 m.",
       reflection: "Fijar un único sistema de coordenadas desde el primer renglón evita por completo confusiones de signos en movimientos opuestos.",
       files: []
     },
@@ -397,17 +542,11 @@ const DEFAULT_DB = {
       date: "2026-04-16",
       statement: "Dos masas m₁ = 3 kg y m₂ = 5 kg están conectadas por una cuerda inextensible y ligera que pasa por una polea ideal sin fricción. Halle la aceleración del sistema y la tensión en la cuerda al soltarlas del reposo.",
       formulas: "T - m_1 g = m_1 a, \\quad m_2 g - T = m_2 a \\implies a = \\frac{m_2 - m_1}{m_1 + m_2} g",
-      stepByStep: "Paso 1: DCL y ecuaciones dinámicas individuales:\nPara m₁ (asciende): T - 3(9.8) = 3 a\nPara m₂ (desciende): 5(9.8) - T = 5 a\n\nPaso 2: Sumando ambas ecuaciones:\n(5 - 3)(9.8) = (3 + 5) a ⇒ 19.6 = 8 a ⇒ a = 2.45 m/s²\n\nPaso 3: Sustituyendo en la primera ecuación:\nT = 3(9.8 + 2.45) = 3(12.25) = 36.75 N",
+      stepByStep: "Paso 1: DCL y ecuaciones dinámicas individuales:\nPara m₁: T - 3(9.8) = 3 a\nPara m₂: 5(9.8) - T = 5 a\n\nPaso 2: Sumando ambas ecuaciones:\n(5 - 3)(9.8) = (3 + 5) a ⇒ 19.6 = 8 a ⇒ a = 2.45 m/s²\n\nPaso 3: Sustituyendo en la primera ecuación:\nT = 3(9.8 + 2.45) = 36.75 N",
       finalAnswer: "Aceleración a = 2.45 m/s²; Tensión en la cuerda T = 36.75 N.",
-      verification: "Comprobando en m₂: T = 5(9.8 - 2.45) = 5(7.35) = 36.75 N.",
+      verification: "Comprobando en m₂: T = 5(9.8 - 2.45) = 36.75 N.",
       reflection: "Al sumar las ecuaciones del sistema se cancelan las fuerzas internas (tensión), facilitando el despeje inmediato de la aceleración.",
-      files: [
-        {
-          name: "dcl_plano_inclinado_rozamiento.svg",
-          type: "image/svg+xml",
-          data: "assets/evidencias/dcl_plano_inclinado.svg"
-        }
-      ]
+      files: []
     }
   ],
   exams: [
@@ -420,7 +559,7 @@ const DEFAULT_DB = {
       statement: "Un bloque es arrastrado sobre un plano horizontal una distancia de 8 metros por una fuerza constante F = 60 N orientada a 30° sobre la horizontal. Calcule el trabajo efectuado por dicha fuerza.",
       originalProcedure: "Se utilizó la fórmula W = F · d · cos(θ), pero se colocó: W = 60 N × 8 m × cos(60°) = 240 J, confundiéndose el ángulo de inclinación respecto a la vertical con el ángulo respecto a la horizontal.",
       identifiedError: "ERROR DE LECTURA Y DEFINICIÓN: El enunciado indicaba 30° con la horizontal (paralelo al desplazamiento). Se tomó erróneamente el ángulo complementario con la normal vertical (60°), reduciendo a la mitad el trabajo real.",
-      correctSolution: "Paso 1: Identificar ángulo relativo φ entre F y el desplazamiento Δr:\nφ = 30° - 0° = 30°\n\nPaso 2: Cálculo con definición formal:\nW = |F| |Δr| cos(30°) = 60 N × 8 m × (√3 / 2) = 480 × 0.8660 = 415.69 Joules",
+      correctSolution: "Paso 1: Identificar ángulo relativo φ entre F y el desplazamiento Δr:\nφ = 30° - 0° = 30°\n\nPaso 2: Cálculo con definición formal:\nW = |F| |Δr| cos(30°) = 60 N × 8 m × (√3 / 2) = 415.69 Joules",
       verification: "Comprobación por componentes: Fx = 60 cos(30°) = 51.96 N. W = Fx · Δx = 51.96 N × 8 m = 415.68 J.",
       preventionReflection: "Siempre trazar ambos vectores partiendo del mismo punto origen e identificar explícitamente el ángulo relativo antes de calcular funciones trigonométricas.",
       files: []
@@ -434,16 +573,10 @@ const DEFAULT_DB = {
       statement: "Un proyectil se dispara desde la cima de un acantilado de 45 m de altura con rapidez de 25 m/s a un ángulo de 37° por encima de la horizontal. Halle el alcance horizontal hasta impactar en el suelo.",
       originalProcedure: "Se utilizó la fórmula de alcance simplificado: R = (v₀² sin 2θ) / g = (25² · sin 74°) / 9.8 = 61.31 metros.",
       identifiedError: "ERROR DE HIPÓTESIS DE VALIDEZ: Se aplicó la fórmula de alcance horizontal plano que sólo es válida cuando la altura final es igual a la inicial (Δy = 0), ignorando los 45 metros de caída extra.",
-      correctSolution: "Paso 1: Descomposición inicial:\nv₀x = 25 cos(37°) = 19.96 m/s; v₀y = 25 sin(37°) = 15.04 m/s\n\nPaso 2: Ecuación vertical con y₀ = 45 m y suelo en y = 0:\n45 + 15.04 t - 4.9 t² = 0 ⇒ 4.9 t² - 15.04 t - 45 = 0\n\nPaso 3: Resolviendo la cuadrática:\nt = [15.04 + √(226.2 + 882)] / 9.8 = [15.04 + 33.29] / 9.8 = 4.93 s\n\nPaso 4: Alcance horizontal real:\nx = v₀x · t = 19.96 m/s × 4.93 s = 98.40 metros",
-      verification: "Comprobación energética: rapidez al impacto v = √(v₀² + 2gh) = √(625 + 2(9.8)(45)) = 38.82 m/s. Concuerda exactamente con √(19.96² + 33.27²).",
+      correctSolution: "Paso 1: Descomposición inicial: v₀x = 19.96 m/s; v₀y = 15.04 m/s\nPaso 2: Ecuación vertical: 45 + 15.04 t - 4.9 t² = 0 ⇒ t = 4.93 s\nPaso 3: Alcance horizontal: x = 19.96 m/s × 4.93 s = 98.40 metros",
+      verification: "Comprobación energética: rapidez de impacto v = √(25² + 2(9.8)(45)) = 38.82 m/s.",
       preventionReflection: "Nunca aplicar fórmulas de atajo sin verificar primero si se cumplen todas sus hipótesis de deducción (como Δy = 0). Las ecuaciones paramétricas horarias son universales.",
-      files: [
-        {
-          name: "correccion_alcance_desnivel.svg",
-          type: "image/svg+xml",
-          data: "assets/evidencias/correccion_parcial_tiro.svg"
-        }
-      ]
+      files: []
     },
     {
       id: "parc-n1",
@@ -454,8 +587,8 @@ const DEFAULT_DB = {
       statement: "Un bloque A de 2 kg descansa sobre un bloque B de 4 kg. Se aplica una fuerza horizontal F al bloque B sobre un suelo liso. Si μs = 0.4 entre ambos bloques, calcule la fuerza máxima F para que el bloque A no deslice sobre B.",
       originalProcedure: "Se planteó que la fricción máxima actuaba como fuerza externa en contra del movimiento del sistema: F = fs_max = μs mA g = 0.4(2)(9.8) = 7.84 N.",
       identifiedError: "ERROR GRAVE EN EL DCL Y TERCERA LEY: Se olvidó que la fuerza de fricción entre A y B es una fuerza INTERNA del sistema combinado. Es la fricción hacia adelante sobre el bloque A la que le suministra su aceleración.",
-      correctSolution: "Paso 1: Analizar bloque superior A de forma aislada:\nfs = mA · a ⇒ a_max = μs g = 0.4 × 9.8 = 3.92 m/s²\n\nPaso 2: Analizar sistema conjunto (A + B) con masa total 6 kg:\nF_max = (mA + mB) · a_max = (2 + 4) × 3.92 = 23.52 Newtons",
-      verification: "Comprobación: con F = 23.52 N, el bloque B recibe F = 23.52 N hacia adelante y fricción f = 7.84 N hacia atrás de parte de A. F_neta_B = 15.68 N ⇒ a = 15.68 / 4 = 3.92 m/s².",
+      correctSolution: "Paso 1: Analizar bloque A: a_max = μs g = 0.4 × 9.8 = 3.92 m/s²\nPaso 2: Sistema conjunto (A+B): F_max = (2 + 4) × 3.92 = 23.52 N",
+      verification: "Comprobación: F_neta_B = 23.52 - 7.84 = 15.68 N ⇒ a = 15.68 / 4 = 3.92 m/s².",
       preventionReflection: "Siempre que existan cuerpos superpuestos o en contacto, aislar CADA cuerpo por separado en su propio DCL y verificar que las fuerzas de interacción mutua sean pares de acción y reacción opuestos.",
       files: []
     }
@@ -466,11 +599,11 @@ const DEFAULT_DB = {
       topicId: "tema-vectores",
       title: "Determinación del Cuadrante Polar Real en Vectores",
       difficulty: "Presentaba confusión sistemática al determinar el ángulo polar del vector resultante cuando la componente X era negativa (cuadrantes II y III), confiando a ciegas en la calculadora.",
-      uncomprehendedConcept: "No comprendía que la función arco tangente de la calculadora tiene un rango principal restringido a (-90°, +90°), por lo que no distingue por sí sola entre el segundo y el cuarto cuadrante.",
-      strategyUsed: "Adopté la regla sistemática de representar gráficamente el vector en el plano cartesiano antes de cualquier cálculo y aplicar: si Rx < 0, sumar 180° al ángulo polar.",
-      helpfulResources: "El simulador de vectores PhET de la Universidad de Colorado, videos de descomposición geométrica y tutorías con el profesor.",
-      whatILearned: "Aprendí que las matemáticas deben interpretarse físicamente. El signo de cada componente cartesiana determina de forma unívoca la orientación espacial del vector.",
-      howIVerified: "Resolví una prueba diagnóstica de 8 vectores con componentes en los cuatro cuadrantes, obteniendo el 100% de aciertos tanto en módulo como en dirección polar.",
+      uncomprehendedConcept: "No comprendía que la función arco tangente de la calculadora tiene un rango principal restringido a (-90°, +90°).",
+      strategyUsed: "Adopté la regla sistemática de representar gráficamente el vector en el plano cartesiano y aplicar: si Rx < 0, sumar 180° al ángulo polar.",
+      helpfulResources: "Simulador de vectores PhET de la Universidad de Colorado y tutorías con el profesor.",
+      whatILearned: "Aprendí que las matemáticas deben interpretarse físicamente. El signo de cada componente cartesiana determina la orientación espacial del vector.",
+      howIVerified: "Resolví una prueba diagnóstica de 8 vectores con componentes en los cuatro cuadrantes con 100% de aciertos.",
       personalReflection: "Superar esta dificultad fortaleció mi confianza para abordar cinemática y dinámica sin arrastrar fallos trigonométricos.",
       files: []
     },
@@ -479,11 +612,11 @@ const DEFAULT_DB = {
       topicId: "tema-cinematica",
       title: "Convención de Signos en Caída Libre y Tiro Parabólico",
       difficulty: "Me resultaba difícil elegir los signos correctos en las ecuaciones horarias cuando un proyectil subía y luego descendía.",
-      uncomprehendedConcept: "Confundía el signo del vector velocidad (que cambia de positivo a negativo) con el signo del vector aceleración de la gravedad (que siempre apunta hacia abajo hacia el centro de la Tierra).",
-      strategyUsed: "Fijar explícitamente desde el primer renglón del problema: 'Eje vertical positivo hacia arriba, por lo tanto a_y = -g = -9.8 m/s² constante durante todo el vuelo'.",
-      helpfulResources: "Diagramas vectoriales paso a paso del profesor y la animación interactiva con vectores velocidad y aceleración visibles.",
-      whatILearned: "Comprendí que la aceleración no se vuelve cero en el punto más alto; sólo la componente vertical de la velocidad se anula instantáneamente, mientras que 'g' permanece constante.",
-      howIVerified: "Resolví correctamente 5 problemas de proyectiles con distintas alturas de inicio y fin en el taller de repaso previo al examen.",
+      uncomprehendedConcept: "Confundía el signo del vector velocidad con el signo del vector aceleración de la gravedad.",
+      strategyUsed: "Fijar explícitamente desde el primer renglón: 'Eje vertical positivo hacia arriba, por lo tanto a_y = -g = -9.8 m/s² constante'.",
+      helpfulResources: "Diagramas vectoriales paso a paso del profesor.",
+      whatILearned: "Comprendí que la aceleración no se vuelve cero en el punto más alto; sólo la velocidad vertical se anula instantáneamente.",
+      howIVerified: "Resolví correctamente 5 problemas de proyectiles con distintas alturas de inicio y fin en el taller de repaso.",
       personalReflection: "La claridad en el sistema de coordenadas eliminó por completo los errores de signos algebraicos.",
       files: []
     },
@@ -491,12 +624,12 @@ const DEFAULT_DB = {
       id: "learn-n1",
       topicId: "tema-newton",
       title: "Construcción Rigurosa del Diagrama de Cuerpo Libre (DCL)",
-      difficulty: "Dificultad recurrente en la formulación del DCL, omitiendo la fuerza normal en planos inclinados o dibujando fuerzas ficticias que no existían físicamente.",
-      uncomprehendedConcept: "Pensaba que 'la fuerza centrípeta' o 'la inercia' eran fuerzas reales aplicadas, en vez de entender que son el efecto resultante de interacciones físicas reales (tensión, fricción, gravedad).",
-      strategyUsed: "Elaborar una lista de chequeo física para cada cuerpo: 1. Gravedad (peso hacia abajo); 2. Contactos físicos reales (normales perpendiculares, tensiones por cuerdas, fricciones tangenciales). Si no hay contacto, no hay fuerza.",
-      helpfulResources: "Capítulo 5 del libro Sears-Zemansky y la técnica de dibujar cada cuerpo en una página separada con código de colores.",
-      whatILearned: "Que una fuerza sólo existe si hay un agente físico identificable que la ejerza. El DCL es el puente indispensable entre el enunciado verbal y la matemática.",
-      howIVerified: "Resolví correctamente los 6 ejercicios de sistemas acoplados del examen parcial sin omitir ni duplicar ninguna fuerza en los diagramas.",
+      difficulty: "Dificultad recurrente en la formulación del DCL, omitiendo la fuerza normal o dibujando fuerzas ficticias.",
+      uncomprehendedConcept: "Pensaba que 'la inercia' era una fuerza real aplicada en vez de una propiedad intrínseca de la masa.",
+      strategyUsed: "Lista de chequeo física: 1. Gravedad hacia abajo; 2. Contactos físicos reales. Si no hay contacto, no hay fuerza.",
+      helpfulResources: "Capítulo 5 del Sears-Zemansky con código de colores.",
+      whatILearned: "Una fuerza sólo existe si hay un agente físico identificable que la ejerza. El DCL es el puente indispensable entre el enunciado y la matemática.",
+      howIVerified: "Resolví correctamente los 6 ejercicios de sistemas acoplados del examen parcial sin omitir ni duplicar ninguna fuerza.",
       personalReflection: "Aprender a elaborar un DCL riguroso transformó mi manera de abordar la física: pasé de memorizar fórmulas a razonar interacciones físicas reales.",
       files: []
     }
@@ -504,12 +637,13 @@ const DEFAULT_DB = {
 };
 
 // ============================================================================
-// GESTIÓN DE ESTADO Y PERSISTENCIA (LOCALSTORAGE Y MIGRACIÓN)
+// GESTIÓN DE BASE DE DATOS Y MIGRACIÓN TRANSPARENTE
 // ============================================================================
 
 let appDB = loadDatabase();
 let currentView = "inicio";
 let activeDetailTopicId = null;
+let activeDetailSubtab = "sub-definiciones";
 let currentConfirmAction = null;
 
 // Filtros en memoria
@@ -517,7 +651,6 @@ let filters = {
   topicsSearch: "",
   topicsStatus: "all",
   practicesSearch: "",
-  practicesTopic: "all",
   workshopsSearch: "",
   workshopsTopic: "all",
   examsSearch: "",
@@ -526,171 +659,173 @@ let filters = {
   learningsTopic: "all"
 };
 
-/**
- * Carga la base de datos completa de LocalStorage con migración transparente
- */
 function loadDatabase() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_DB);
     if (raw) {
       const parsed = JSON.parse(raw);
-      // Asegurar arrays mínimos
       parsed.profile = parsed.profile || structuredClone(DEFAULT_DB.profile);
-      parsed.topics = Array.isArray(parsed.topics) ? parsed.topics : [];
-      parsed.practices = Array.isArray(parsed.practices) ? parsed.practices : [];
-      parsed.workshops = Array.isArray(parsed.workshops) ? parsed.workshops : [];
-      parsed.exams = Array.isArray(parsed.exams) ? parsed.exams : [];
-      parsed.learnings = Array.isArray(parsed.learnings) ? parsed.learnings : [];
+      parsed.topics = Array.isArray(parsed.topics) ? parsed.topics : structuredClone(DEFAULT_DB.topics);
+      parsed.practiceFiles = Array.isArray(parsed.practiceFiles) ? parsed.practiceFiles : structuredClone(DEFAULT_DB.practiceFiles);
+      parsed.workshops = Array.isArray(parsed.workshops) ? parsed.workshops : structuredClone(DEFAULT_DB.workshops);
+      parsed.exams = Array.isArray(parsed.exams) ? parsed.exams : structuredClone(DEFAULT_DB.exams);
+      parsed.learnings = Array.isArray(parsed.learnings) ? parsed.learnings : structuredClone(DEFAULT_DB.learnings);
+
+      // Normalizar estructura de cada tema a las 4 secciones solicitadas
+      parsed.topics.forEach((t) => {
+        // 1. Definiciones
+        if (Array.isArray(t.definitions)) {
+          t.definitions = t.definitions.map(d => ({
+            id: d.id || generateUniqueId("card_def"),
+            title: d.title || d.term || "",
+            text: d.text || d.definition || "",
+            imageData: d.imageData || null,
+            imageFileId: d.imageFileId || null,
+            imageName: d.imageName || null
+          }));
+        } else {
+          t.definitions = [];
+        }
+
+        // 2. Fórmulas
+        if (Array.isArray(t.formulas)) {
+          t.formulas = t.formulas.map(f => ({
+            id: f.id || generateUniqueId("card_form"),
+            title: f.title || f.name || "",
+            latex: f.latex || "",
+            text: f.text || [f.variables, f.conditions, f.example].filter(Boolean).join("\n") || "",
+            imageData: f.imageData || null,
+            imageFileId: f.imageFileId || null,
+            imageName: f.imageName || null
+          }));
+        } else {
+          t.formulas = [];
+        }
+
+        // 3. Metacognición
+        if (!Array.isArray(t.metacognition)) {
+          t.metacognition = [];
+          // Si existían situaciones asociadas a este tema en learnings, migrarlas
+          if (Array.isArray(parsed.learnings)) {
+            const topicLearnings = parsed.learnings.filter(l => l.topicId === t.id);
+            topicLearnings.forEach(l => {
+              t.metacognition.push({
+                id: generateUniqueId("card_meta"),
+                title: l.title || "Reflexión Metacognitiva",
+                text: l.difficulty ? `Dificultad: ${l.difficulty}\n\nEstrategia: ${l.strategyUsed || ''}\n\nQué aprendí: ${l.whatILearned || ''}` : (l.text || ""),
+                imageData: null
+              });
+            });
+          }
+        }
+
+        // 4. Evidencias
+        if (!Array.isArray(t.evidencias)) {
+          t.evidencias = [];
+          if (t.mapFile && t.mapFile.data) {
+            t.evidencias.push({
+              id: generateUniqueId("card_evi"),
+              title: "Mapa Conceptual",
+              text: t.conceptualScheme || "",
+              imageData: t.mapFile.data,
+              imageName: t.mapFile.name || "mapa.svg"
+            });
+          }
+        }
+      });
+
       return parsed;
     }
 
-    // Comprobar si existen datos en la versión anterior (v2) para migrar sin pérdida
-    const legacyTopicsRaw = localStorage.getItem(LEGACY_STORAGE_KEY_TOPICS);
-    const legacyProfileRaw = localStorage.getItem(LEGACY_STORAGE_KEY_PROFILE);
-
-    if (legacyTopicsRaw) {
-      console.log("Migrando datos de Portafolio v2 a estructura v3 independiente...");
-      const legacyTopics = JSON.parse(legacyTopicsRaw);
-      const legacyProfile = legacyProfileRaw ? JSON.parse(legacyProfileRaw) : DEFAULT_DB.profile;
-
-      const newDB = {
-        profile: legacyProfile,
-        topics: [],
-        practices: [],
-        workshops: [],
-        exams: [],
-        learnings: []
-      };
-
-      legacyTopics.forEach(topic => {
-        // Extraer prácticas
-        if (Array.isArray(topic.practices)) {
-          topic.practices.forEach(p => {
-            newDB.practices.push({
-              ...p,
-              id: p.id || generateUniqueId("prac"),
-              topicId: topic.id,
-              date: p.date || new Date().toISOString().slice(0, 10)
-            });
-          });
-        }
-
-        // Extraer talleres
-        if (Array.isArray(topic.workshops)) {
-          topic.workshops.forEach(w => {
-            newDB.workshops.push({
-              ...w,
-              id: w.id || generateUniqueId("tall"),
-              topicId: topic.id,
-              date: w.date || new Date().toISOString().slice(0, 10)
-            });
-          });
-        }
-
-        // Extraer parciales
-        if (Array.isArray(topic.exams)) {
-          topic.exams.forEach(e => {
-            newDB.exams.push({
-              ...e,
-              id: e.id || generateUniqueId("parc"),
-              topicId: topic.id,
-              date: e.date || new Date().toISOString().slice(0, 10)
-            });
-          });
-        }
-
-        // Extraer situación de aprendizaje
-        if (topic.learningSituation && (topic.learningSituation.difficulty || topic.learningSituation.whatILearned)) {
-          newDB.learnings.push({
-            id: generateUniqueId("learn"),
-            topicId: topic.id,
-            title: `Aprendizaje en ${topic.title}`,
-            difficulty: topic.learningSituation.difficulty || "",
-            uncomprehendedConcept: topic.learningSituation.uncomprehendedConcept || "",
-            strategyUsed: topic.learningSituation.strategyUsed || "",
-            helpfulResources: topic.learningSituation.helpfulResources || "",
-            whatILearned: topic.learningSituation.whatILearned || "",
-            howIVerified: topic.learningSituation.howIVerified || "",
-            personalReflection: topic.learningSituation.personalReflection || "",
-            files: topic.learningSituation.files || []
-          });
-        }
-
-        // Convertir conceptos texto a array de definiciones estructuradas
-        const definitions = [];
-        if (typeof topic.concepts === "string" && topic.concepts.trim()) {
-          const lines = topic.concepts.split("\n").filter(l => l.trim());
-          lines.forEach((line, lIdx) => {
-            const clean = line.replace(/^[•\-\*]\s*/, "");
-            const parts = clean.split(":");
-            if (parts.length > 1) {
-              definitions.push({
-                id: `def_${topic.id}_${lIdx}`,
-                term: parts[0].trim(),
-                definition: parts.slice(1).join(":").trim()
-              });
-            } else {
-              definitions.push({
-                id: `def_${topic.id}_${lIdx}`,
-                term: `Concepto ${lIdx + 1}`,
-                definition: clean.trim()
-              });
-            }
-          });
-        }
-
-        newDB.topics.push({
-          id: topic.id,
-          order: topic.order || 1,
-          title: topic.title,
-          description: topic.description || "",
-          status: topic.status || "En progreso",
-          estimatedHours: topic.estimatedHours || "20 horas",
-          conceptualScheme: topic.relationships || (topic.concepts || ""),
-          mapFile: topic.mapFile || null,
-          definitions: definitions.length > 0 ? definitions : (topic.definitions || []),
-          formulas: Array.isArray(topic.formulas) ? topic.formulas : [],
-          files: []
-        });
-      });
-
-      // Guardar en la nueva estructura v3
-      localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(newDB));
-      return newDB;
-    }
-
-    // Si no hay datos, inicializar con DEFAULT_DB
+    // Inicializar con DEFAULT_DB
     const initial = structuredClone(DEFAULT_DB);
     localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(initial));
     return initial;
   } catch (err) {
-    console.error("Error al cargar base de datos:", err);
+    console.error("Error al cargar la base de datos:", err);
     return structuredClone(DEFAULT_DB);
   }
 }
 
-/**
- * Guarda el estado actual en LocalStorage con control de cuota
- */
+// ============================================================================
+// MOTOR DE GUARDADO AUTOMÁTICO EN TIEMPO REAL (AUTOSAVE)
+// ============================================================================
+
+let autoSaveTimer = null;
+let isSaving = false;
+
+function scheduleAutoSave(delayMs = 350) {
+  setAutosaveUI("saving");
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+
+  autoSaveTimer = setTimeout(() => {
+    saveDatabase();
+  }, delayMs);
+}
+
+function flushAutoSave() {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+  return saveDatabase();
+}
+
 function saveDatabase() {
+  if (isSaving) return true;
+  isSaving = true;
   try {
     localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(appDB));
     updateStorageMeter();
+    setAutosaveUI("saved");
+    isSaving = false;
     return true;
   } catch (err) {
-    console.error("Error al guardar en LocalStorage:", err);
+    isSaving = false;
+    console.error("Error de guardado en LocalStorage:", err);
+    setAutosaveUI("error");
     if (err.name === "QuotaExceededError" || err.code === 22) {
-      showToast("¡Límite de memoria local superado! Reduce el tamaño de los archivos adjuntos o exporta un respaldo.", "error");
-    } else {
-      showToast("No se pudo guardar la información en este navegador.", "error");
+      showToast("Memoria LocalStorage llena. Las imágenes grandes se guardan en IndexedDB.", "error");
     }
     return false;
   }
 }
 
-/**
- * Calcula el espacio aproximado de almacenamiento utilizado
- */
+function setAutosaveUI(state) {
+  const topbar = document.getElementById("topbarAutosave");
+  const text = document.getElementById("autosaveText");
+  const modalBadges = document.querySelectorAll(".modal-autosave-badge");
+
+  if (state === "saving") {
+    if (topbar) topbar.className = "topbar-autosave saving";
+    if (text) text.textContent = "Guardando...";
+    modalBadges.forEach(b => {
+      b.className = "modal-autosave-badge saving";
+      b.textContent = "⏳ Guardando...";
+    });
+  } else if (state === "saved") {
+    if (topbar) topbar.className = "topbar-autosave saved";
+    if (text) text.textContent = "Guardado";
+    modalBadges.forEach(b => {
+      b.className = "modal-autosave-badge saved";
+      b.textContent = "✓ Guardado";
+    });
+  } else if (state === "error") {
+    if (topbar) topbar.className = "topbar-autosave error";
+    if (text) text.textContent = "Error al guardar";
+    modalBadges.forEach(b => {
+      b.className = "modal-autosave-badge error";
+      b.textContent = "⚠️ Error";
+    });
+  }
+}
+
+// Guardar de inmediato si el usuario cambia de pestaña o cierra la ventana
+window.addEventListener("beforeunload", () => flushAutoSave());
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) flushAutoSave();
+});
+
 function updateStorageMeter() {
   try {
     let totalBytes = 0;
@@ -718,9 +853,6 @@ function updateStorageMeter() {
   }
 }
 
-/**
- * Obtiene el título de un tema a partir de su ID
- */
 function getTopicTitleById(topicId) {
   if (!topicId) return "General / No especificado";
   const t = appDB.topics.find(x => x.id === topicId);
@@ -728,85 +860,98 @@ function getTopicTitleById(topicId) {
 }
 
 // ============================================================================
-// NAVEGACIÓN ENTRE VISTAS
+// CONTROLADOR DE NAVEGACIÓN ENTRE VISTAS
 // ============================================================================
 
 function navigateToView(viewName) {
+  flushAutoSave();
   currentView = viewName;
 
-  // Ocultar todas las vistas
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
-
-  // Activar la vista solicitada
   const targetView = document.getElementById(`view-${viewName}`);
   if (targetView) targetView.classList.add("active");
 
-  // Actualizar sidebar activo
   document.querySelectorAll(".nav-item").forEach(item => {
     const itemTarget = item.getAttribute("data-view");
     item.classList.toggle("active", itemTarget === viewName || (viewName === "detail" && itemTarget === "temas"));
   });
 
-  // Título de la barra superior
   const pageTitle = document.getElementById("pageTitle");
+  const topbarTag = document.getElementById("topbarTag");
   const titles = {
-    inicio: "Inicio · Resumen del Portafolio",
-    temas: "2. Mis Temas de Estudio",
-    practicas: "3. Prácticas de Laboratorio",
-    talleres: "4. Talleres y Ejercicios",
-    parciales: "5. Evaluaciones y Parciales",
-    aprendizaje: "6. Mi Aprendizaje y Metacognición",
-    detail: "Detalle del Tema",
-    respaldo: "Copias de Seguridad y Datos"
+    inicio: { title: "Inicio", tag: "PANEL PRINCIPAL" },
+    temas: { title: "2. Mis Temas de Estudio", tag: "CONTENIDOS ACADÉMICOS" },
+    practicas: { title: "3. Prácticas de Laboratorio", tag: "EXPERIMENTACIÓN Y ARCHIVOS" },
+    talleres: { title: "4. Talleres y Ejercicios", tag: "RESOLUCIÓN DE PROBLEMAS" },
+    parciales: { title: "5. Evaluaciones y Parciales", tag: "EVALUACIÓN Y APRENDIZAJE CRÍTICO" },
+    aprendizaje: { title: "6. Mi Aprendizaje y Metacognición", tag: "DIFICULTADES Y ESTRATEGIAS" },
+    respaldo: { title: "Copias de Seguridad y Datos", tag: "GESTIÓN DEL SISTEMA" },
+    detail: { title: "Contenido del Tema", tag: "MIS TEMAS" }
   };
-  if (pageTitle) pageTitle.textContent = titles[viewName] || "Portafolio Digital";
 
-  // Cerrar menú móvil si está abierto
-  closeMobileMenu();
+  if (titles[viewName]) {
+    if (pageTitle) pageTitle.textContent = titles[viewName].title;
+    if (topbarTag) topbarTag.textContent = titles[viewName].tag;
+  }
 
-  // Scroll superior suave
   window.scrollTo({ top: 0, behavior: "smooth" });
-
-  // Re-renderizar la vista correspondiente
+  closeMobileMenu();
   renderActiveView();
 }
 
 function openMobileMenu() {
   document.getElementById("sidebar")?.classList.add("open");
-  document.getElementById("sidebarBackdrop")?.classList.add("active");
+  document.getElementById("sidebarBackdrop")?.classList.add("open");
 }
 
 function closeMobileMenu() {
   document.getElementById("sidebar")?.classList.remove("open");
-  document.getElementById("sidebarBackdrop")?.classList.remove("active");
+  document.getElementById("sidebarBackdrop")?.classList.remove("open");
 }
 
 // ============================================================================
-// RENDERIZADO PRINCIPAL DE LA APLICACIÓN
+// RENDERIZADO GLOBAL DE LA APLICACIÓN
 // ============================================================================
 
 function renderApp() {
-  // Ordenar temas por su campo de orden
-  appDB.topics.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
-
-  // Actualizar perfil de usuario
   updateProfileUI();
-
-  // Actualizar contadores del Sidebar
-  document.getElementById("navTopicsCount").textContent = appDB.topics.length;
-  document.getElementById("navPracticesCount").textContent = appDB.practices.length;
-  document.getElementById("navWorkshopsCount").textContent = appDB.workshops.length;
-  document.getElementById("navExamsCount").textContent = appDB.exams.length;
-  document.getElementById("navLearningsCount").textContent = appDB.learnings.length;
-
-  // Llenar selects de temas en los formularios y filtros
+  updateNavBadges();
   populateTopicSelects();
-
-  // Renderizar la vista actualmente visible
-  renderActiveView();
-
-  // Actualizar medidor de espacio
   updateStorageMeter();
+  renderActiveView();
+}
+
+function updateNavBadges() {
+  const topicsCount = appDB.topics.length;
+  const practicesCount = appDB.practiceFiles ? appDB.practiceFiles.length : 0;
+  const workshopsCount = appDB.workshops.length;
+  const examsCount = appDB.exams.length;
+  const learningsCount = appDB.learnings.length;
+
+  const setBadge = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  };
+
+  setBadge("navTopicsCount", topicsCount);
+  setBadge("navPracticesCount", practicesCount);
+  setBadge("navWorkshopsCount", workshopsCount);
+  setBadge("navExamsCount", examsCount);
+  setBadge("navLearningsCount", learningsCount);
+
+  // KPIs de la vista Inicio
+  setBadge("kpiTopicsCount", topicsCount);
+  setBadge("kpiPracticesCount", practicesCount);
+  setBadge("kpiWorkshopsCount", workshopsCount);
+  setBadge("kpiExamsCount", examsCount);
+  setBadge("kpiLearningsCount", learningsCount);
+
+  const completed = appDB.topics.filter(t => t.status === "Completado").length;
+  const progressPct = topicsCount > 0 ? Math.round((completed / topicsCount) * 100) : 0;
+  const progText = document.getElementById("kpiGlobalProgress");
+  const progBar = document.getElementById("kpiGlobalProgressBar");
+  if (progText) progText.textContent = `${progressPct}%`;
+  if (progBar) progBar.style.width = `${progressPct}%`;
 }
 
 function renderActiveView() {
@@ -838,156 +983,76 @@ function renderActiveView() {
   }
 }
 
-/**
- * Actualiza la información del perfil del estudiante en la interfaz
- */
 function updateProfileUI() {
-  const p = appDB.profile || DEFAULT_DB.profile;
+  const p = appDB.profile;
+  const avatar = document.getElementById("sidebarAvatar");
+  const name = document.getElementById("sidebarStudentName");
+  const meta = document.getElementById("sidebarStudentMeta");
 
-  const sideName = document.getElementById("sidebarStudentName");
-  const sideMeta = document.getElementById("sidebarStudentMeta");
-  const sideAvatar = document.getElementById("sidebarAvatar");
-
-  if (sideName) sideName.textContent = p.studentName || "Estudiante";
-  if (sideMeta) sideMeta.textContent = `${p.career || "Ingeniería"} · ${p.semester || "Física I"}`;
-  if (sideAvatar) {
-    const initials = (p.studentName || "AM")
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map(w => w[0].toUpperCase())
-      .join("");
-    sideAvatar.textContent = initials || "FI";
+  if (name) name.textContent = p.name || "Estudiante";
+  if (meta) meta.textContent = `${p.career || "Física I"} · ${p.term || "2026-I"}`;
+  if (avatar) {
+    const initials = (p.name || "E").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+    avatar.textContent = initials || "AM";
   }
-
-  const profName = document.getElementById("profileStudentName");
-  const profUniv = document.getElementById("profileUniversity");
-  const profCareer = document.getElementById("profileCareer");
-  const profProf = document.getElementById("profileProfessor");
-  const profSem = document.getElementById("profileSemester");
-  const profPres = document.getElementById("profilePresentation");
-  const profObj = document.getElementById("profileObjectives");
-
-  if (profName) profName.textContent = p.studentName;
-  if (profUniv) profUniv.textContent = p.university;
-  if (profCareer) profCareer.textContent = p.career;
-  if (profProf) profProf.textContent = p.professor;
-  if (profSem) profSem.textContent = p.semester;
-  if (profPres) profPres.textContent = p.presentation;
-  if (profObj) profObj.textContent = p.objectives;
-
-  const topbarTag = document.getElementById("topbarTag");
-  if (topbarTag) topbarTag.textContent = `SEMESTRE ${p.semester || "2026-I"}`;
 }
 
-/**
- * Llena todos los selectores desplegables de temas en filtros y modales
- */
 function populateTopicSelects() {
-  const selectIds = [
-    "filterPracticeTopicSelect",
-    "filterWorkshopTopicSelect",
-    "filterExamTopicSelect",
-    "filterLearningTopicSelect",
-    "defFormTopicSelect",
-    "formulaFormTopicSelect",
-    "practiceFormTopicSelect",
-    "workshopFormTopicSelect",
-    "examFormTopicSelect",
-    "learningFormTopicSelect"
+  const selects = [
+    document.getElementById("filterWorkshopTopicSelect"),
+    document.getElementById("filterExamTopicSelect"),
+    document.getElementById("filterLearningTopicSelect"),
+    document.getElementById("workshopFormTopicSelect"),
+    document.getElementById("examFormTopicSelect"),
+    document.getElementById("learningFormTopicSelect")
   ];
 
-  selectIds.forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
+  selects.forEach(select => {
+    if (!select) return;
+    const currentVal = select.value;
+    const isFilter = select.id.startsWith("filter");
 
-    const currentVal = el.value;
-    const isFilter = id.startsWith("filter");
-
-    let options = isFilter ? '<option value="all">Todos los temas</option>' : '';
-    if (!isFilter && (id.includes("practice") || id.includes("workshop") || id.includes("exam") || id.includes("learning"))) {
-      options += '<option value="">(Sin vincular a un tema específico)</option>';
-    }
+    let optionsHTML = isFilter
+      ? `<option value="all">Todos los temas</option>`
+      : `<option value="">(Sin vincular a un tema específico)</option>`;
 
     appDB.topics.forEach(t => {
-      options += `<option value="${escapeHTML(t.id)}">Tema ${t.order}: ${escapeHTML(t.title)}</option>`;
+      optionsHTML += `<option value="${escapeHTML(t.id)}">${escapeHTML(t.title)}</option>`;
     });
 
-    el.innerHTML = options;
-    if (currentVal) el.value = currentVal;
+    select.innerHTML = optionsHTML;
+    if (currentVal) select.value = currentVal;
   });
 }
 
 // ============================================================================
-// 1. RENDERIZADO DE INICIO (DASHBOARD)
+// VISTA 1: INICIO (DASHBOARD)
 // ============================================================================
 
 function renderInicio() {
-  const totalTopics = appDB.topics.length;
-  const totalPractices = appDB.practices.length;
-  const totalWorkshops = appDB.workshops.length;
-  const totalExams = appDB.exams.length;
-  const totalLearnings = appDB.learnings.length;
-
-  document.getElementById("kpiTopicsCount").textContent = totalTopics;
-  document.getElementById("kpiPracticesCount").textContent = totalPractices;
-  document.getElementById("kpiWorkshopsCount").textContent = totalWorkshops;
-  document.getElementById("kpiExamsCount").textContent = totalExams;
-  document.getElementById("kpiLearningsCount").textContent = totalLearnings;
-
-  // Calcular porcentaje promedio de avance
-  const completedTopics = appDB.topics.filter(t => t.status === "Completado").length;
-  const globalProgress = totalTopics > 0 ? Math.round((completedTopics / totalTopics) * 100) : 0;
-
-  document.getElementById("kpiGlobalProgress").textContent = `${globalProgress}%`;
-  document.getElementById("kpiGlobalProgressBar").style.width = `${globalProgress}%`;
-
-  // Temas recientes (primeros 3)
-  const recentTopicsContainer = document.getElementById("homeRecentTopicsGrid");
-  if (recentTopicsContainer) {
-    if (appDB.topics.length === 0) {
-      recentTopicsContainer.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">📖</div>
-          <h3>Aún no hay temas registrados</h3>
-          <p>Comienza registrando el primer tema de tu portafolio de Física I.</p>
-          <button class="btn btn-primary" onclick="openTopicModal()">＋ Crear primer tema</button>
-        </div>`;
-    } else {
-      recentTopicsContainer.innerHTML = appDB.topics.slice(0, 3).map(t => createTopicCardHTML(t)).join("");
-      bindTopicCardClicks(recentTopicsContainer);
-    }
+  const recentTopicsGrid = document.getElementById("homeRecentTopicsGrid");
+  if (recentTopicsGrid) {
+    const recent = [...appDB.topics].slice(0, 3);
+    recentTopicsGrid.innerHTML = recent.map(t => createTopicCardHTML(t)).join("");
+    bindTopicCardClicks(recentTopicsGrid);
   }
 
-  // Actividades recientes consolidadas
-  const activitiesContainer = document.getElementById("homeRecentActivitiesGrid");
-  if (activitiesContainer) {
-    const allActivities = [
-      ...appDB.practices.map(p => ({ ...p, typeLabel: "Práctica", typeClass: "practica", viewName: "practicas" })),
-      ...appDB.workshops.map(w => ({ ...w, typeLabel: "Taller", typeClass: "taller", viewName: "talleres" })),
-      ...appDB.exams.map(e => ({ ...e, typeLabel: "Parcial", typeClass: "parcial", viewName: "parciales" })),
-      ...appDB.learnings.map(l => ({ ...l, typeLabel: "Metacognición", typeClass: "aprendizaje", viewName: "aprendizaje" }))
-    ].slice(0, 3);
+  const recentActsGrid = document.getElementById("homeRecentActivitiesGrid");
+  if (recentActsGrid) {
+    const items = [];
+    (appDB.practiceFiles || []).slice(0, 2).forEach(p => items.push({ ...p, kind: "practica", title: p.name, view: "practicas" }));
+    (appDB.workshops || []).slice(0, 2).forEach(w => items.push({ ...w, kind: "taller", view: "talleres" }));
+    (appDB.exams || []).slice(0, 2).forEach(e => items.push({ ...e, kind: "parcial", view: "parciales" }));
 
-    if (allActivities.length === 0) {
-      activitiesContainer.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">📝</div>
-          <h3>Sin actividades registradas aún</h3>
-          <p>Puedes registrar prácticas, talleres y parciales desde sus apartados dedicados.</p>
-        </div>`;
+    if (items.length === 0) {
+      recentActsGrid.innerHTML = `<p class="text-muted" style="grid-column: 1/-1;">No hay actividades registradas aún.</p>`;
     } else {
-      activitiesContainer.innerHTML = allActivities.map(act => `
-        <div class="activity-card">
-          <div class="activity-card-top">
-            <span class="activity-type-badge ${act.typeClass}">${act.typeLabel}</span>
-            <span class="activity-date">${act.date || ""}</span>
-          </div>
-          <span class="topic-tag">${escapeHTML(getTopicTitleById(act.topicId))}</span>
-          <h4 class="activity-card-title">${escapeHTML(act.title)}</h4>
-          <p class="activity-card-body">${escapeHTML(act.statement || act.difficulty || act.objectives || act.description || "")}</p>
-          <div class="activity-card-foot">
-            <button class="btn btn-secondary btn-sm" onclick="navigateToView('${act.viewName}')">Ver en ${act.typeLabel} →</button>
+      recentActsGrid.innerHTML = items.map(item => `
+        <div class="recent-act-item" onclick="navigateToView('${item.view}')" style="cursor: pointer;">
+          <div class="recent-act-badge ${item.kind}">${item.kind.toUpperCase()}</div>
+          <div class="recent-act-info">
+            <strong>${escapeHTML(item.title || item.name)}</strong>
+            <span class="text-muted" style="font-size: 12px;">${escapeHTML(getTopicTitleById(item.topicId))}</span>
           </div>
         </div>
       `).join("");
@@ -996,310 +1061,109 @@ function renderInicio() {
 }
 
 // ============================================================================
-// 2. RENDERIZADO DE MIS TEMAS
+// VISTA 2: MIS TEMAS (LISTADO GENERAL)
 // ============================================================================
 
 function renderTemas() {
-  const container = document.getElementById("topicsGrid");
-  const emptyState = document.getElementById("topicsEmptyState");
-  if (!container) return;
+  const grid = document.getElementById("topicsGrid");
+  const empty = document.getElementById("topicsEmptyState");
+  if (!grid) return;
 
-  const q = (filters.topicsSearch || "").trim().toLowerCase();
-  const statusFilter = filters.topicsStatus;
-
-  const filtered = appDB.topics.filter(t => {
-    const matchQ = (t.title + " " + (t.description || "")).toLowerCase().includes(q);
-    const matchStatus = statusFilter === "all" || t.status === statusFilter;
-    return matchQ && matchStatus;
+  let filtered = appDB.topics.filter(t => {
+    const matchSearch = !filters.topicsSearch ||
+      t.title.toLowerCase().includes(filters.topicsSearch.toLowerCase()) ||
+      (t.description && t.description.toLowerCase().includes(filters.topicsSearch.toLowerCase()));
+    const matchStatus = filters.topicsStatus === "all" || t.status === filters.topicsStatus;
+    return matchSearch && matchStatus;
   });
 
-  // Contadores de estado
-  document.getElementById("countTopicsAll").textContent = appDB.topics.length;
-  document.getElementById("countTopicsComplete").textContent = appDB.topics.filter(t => t.status === "Completado").length;
-  document.getElementById("countTopicsProgress").textContent = appDB.topics.filter(t => t.status === "En progreso").length;
-  document.getElementById("countTopicsPending").textContent = appDB.topics.filter(t => t.status === "Pendiente").length;
+  document.getElementById("countTopicsAll") && (document.getElementById("countTopicsAll").textContent = appDB.topics.length);
+  document.getElementById("countTopicsComplete") && (document.getElementById("countTopicsComplete").textContent = appDB.topics.filter(t => t.status === "Completado").length);
+  document.getElementById("countTopicsProgress") && (document.getElementById("countTopicsProgress").textContent = appDB.topics.filter(t => t.status === "En progreso").length);
+  document.getElementById("countTopicsPending") && (document.getElementById("countTopicsPending").textContent = appDB.topics.filter(t => t.status === "Pendiente").length);
 
   if (filtered.length === 0) {
-    container.innerHTML = "";
-    if (emptyState) emptyState.classList.remove("hidden");
+    grid.innerHTML = "";
+    if (empty) empty.classList.remove("hidden");
   } else {
-    if (emptyState) emptyState.classList.add("hidden");
-    container.innerHTML = filtered.map(t => createTopicCardHTML(t)).join("");
-    bindTopicCardClicks(container);
+    if (empty) empty.classList.add("hidden");
+    grid.innerHTML = filtered.map(t => createTopicCardHTML(t)).join("");
+    bindTopicCardClicks(grid);
   }
 }
 
 function createTopicCardHTML(topic) {
+  const defCount = (topic.definitions && topic.definitions.length) || 0;
+  const formCount = (topic.formulas && topic.formulas.length) || 0;
+  const metaCount = (topic.metacognition && topic.metacognition.length) || 0;
+  const eviCount = (topic.evidencias && topic.evidencias.length) || 0;
+
   const statusSlug = (topic.status || "pendiente").toLowerCase().replace(/\s+/g, "-");
-  const defCount = topic.definitions ? topic.definitions.length : 0;
-  const formCount = topic.formulas ? topic.formulas.length : 0;
-  const linkedPracs = appDB.practices.filter(p => p.topicId === topic.id).length;
-  const linkedWorks = appDB.workshops.filter(w => w.topicId === topic.id).length;
-  const linkedExams = appDB.exams.filter(e => e.topicId === topic.id).length;
 
   return `
-    <article class="topic-card" data-topic-id="${escapeHTML(topic.id)}">
+    <div class="topic-card" data-topic-id="${escapeHTML(topic.id)}">
       <div class="topic-card-header">
-        <div class="topic-order-badge">#${String(topic.order || 1).padStart(2, "0")}</div>
+        <span class="topic-order-badge">#${String(topic.order || 1).padStart(2, "0")}</span>
         <span class="status-badge ${statusSlug}">${escapeHTML(topic.status || "Pendiente")}</span>
       </div>
-
       <h3 class="topic-card-title">${escapeHTML(topic.title)}</h3>
-      <p class="topic-card-desc">${escapeHTML(topic.description || "Sin descripción registrada.")}</p>
+      <p class="topic-card-desc">${escapeHTML(topic.description || "Sin descripción.")}</p>
 
+      <!-- Los 4 apartados académicos del tema -->
       <div class="topic-content-chips">
-        <span class="content-mini-chip ${defCount > 0 ? 'has-content' : ''}">${defCount} Definiciones</span>
-        <span class="content-mini-chip ${formCount > 0 ? 'has-content' : ''}">${formCount} Fórmulas</span>
-        <span class="content-mini-chip ${linkedPracs > 0 ? 'has-content' : ''}">${linkedPracs} Prácticas</span>
-        <span class="content-mini-chip ${linkedWorks > 0 ? 'has-content' : ''}">${linkedWorks} Talleres</span>
-        <span class="content-mini-chip ${linkedExams > 0 ? 'has-content' : ''}">${linkedExams} Parciales</span>
+        <span class="content-mini-chip ${defCount > 0 ? 'has-content' : ''}">Definiciones: ${defCount}</span>
+        <span class="content-mini-chip ${formCount > 0 ? 'has-content' : ''}">Fórmulas: ${formCount}</span>
+        <span class="content-mini-chip ${metaCount > 0 ? 'has-content' : ''}">Metacognición: ${metaCount}</span>
+        <span class="content-mini-chip ${eviCount > 0 ? 'has-content' : ''}">Evidencias: ${eviCount}</span>
       </div>
 
       <div class="topic-card-actions">
-        <button class="btn btn-primary btn-sm action-view-topic" data-id="${escapeHTML(topic.id)}">
-          Ver tema →
+        <button class="btn btn-primary btn-sm btn-view-topic" data-topic-id="${escapeHTML(topic.id)}">
+          Ver Contenido Completo →
         </button>
         <div class="topic-card-actions-right">
-          <button class="icon-action-btn action-edit-topic" title="Editar tema" data-id="${escapeHTML(topic.id)}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+          <button class="icon-action-btn btn-edit-topic" data-topic-id="${escapeHTML(topic.id)}" title="Editar tema">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
           </button>
-          <button class="icon-action-btn delete action-delete-topic" title="Eliminar tema" data-id="${escapeHTML(topic.id)}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          <button class="icon-action-btn delete btn-delete-topic" data-topic-id="${escapeHTML(topic.id)}" title="Eliminar tema">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
           </button>
         </div>
       </div>
-    </article>
+    </div>
   `;
 }
 
 function bindTopicCardClicks(container) {
-  container.querySelectorAll(".action-view-topic").forEach(btn => {
-    btn.onclick = () => showTopicDetail(btn.getAttribute("data-id"));
-  });
-  container.querySelectorAll(".action-edit-topic").forEach(btn => {
-    btn.onclick = () => openTopicModal(btn.getAttribute("data-id"));
-  });
-  container.querySelectorAll(".action-delete-topic").forEach(btn => {
-    btn.onclick = () => confirmDelete("topic", btn.getAttribute("data-id"));
-  });
-}
-
-// ============================================================================
-// 3. RENDERIZADO DE PRÁCTICAS
-// ============================================================================
-
-function renderPracticas() {
-  const container = document.getElementById("practicesGrid");
-  const empty = document.getElementById("practicesEmptyState");
   if (!container) return;
-
-  const q = (filters.practicesSearch || "").trim().toLowerCase();
-  const topicFilter = filters.practicesTopic;
-
-  const filtered = appDB.practices.filter(p => {
-    const matchQ = (p.title + " " + (p.objectives || "") + " " + (p.statement || "")).toLowerCase().includes(q);
-    const matchTopic = topicFilter === "all" || p.topicId === topicFilter;
-    return matchQ && matchTopic;
+  container.querySelectorAll(".btn-view-topic").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      showTopicDetail(btn.getAttribute("data-topic-id"));
+    };
   });
-
-  if (filtered.length === 0) {
-    container.innerHTML = "";
-    if (empty) empty.classList.remove("hidden");
-  } else {
-    if (empty) empty.classList.add("hidden");
-    container.innerHTML = filtered.map(p => `
-      <div class="activity-card">
-        <div class="activity-card-top">
-          <span class="activity-type-badge practica">🧪 Práctica</span>
-          <span class="activity-date">${p.date || "Sin fecha"}</span>
-        </div>
-        <span class="topic-tag">${escapeHTML(getTopicTitleById(p.topicId))}</span>
-        <h4 class="activity-card-title">${escapeHTML(p.title)}</h4>
-        <p class="activity-card-body">${escapeHTML(p.statement || p.objectives || "Sin enunciado registrado.")}</p>
-        <div class="activity-card-meta">
-          <span>📊 ${p.data ? "Datos registrados" : "Sin datos"}</span>
-          <span>📎 ${(p.files && p.files.length) || 0} archivos</span>
-        </div>
-        <div class="activity-card-foot">
-          <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('practice', '${escapeHTML(p.id)}')">Ver detalle</button>
-          <div class="topic-card-actions-right">
-            <button class="icon-action-btn" title="Editar práctica" onclick="openPracticeModal('${escapeHTML(p.id)}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-            </button>
-            <button class="icon-action-btn delete" title="Eliminar práctica" onclick="confirmDelete('practice', '${escapeHTML(p.id)}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-    `).join("");
-  }
-}
-
-// ============================================================================
-// 4. RENDERIZADO DE TALLERES
-// ============================================================================
-
-function renderTalleres() {
-  const container = document.getElementById("workshopsGrid");
-  const empty = document.getElementById("workshopsEmptyState");
-  if (!container) return;
-
-  const q = (filters.workshopsSearch || "").trim().toLowerCase();
-  const topicFilter = filters.workshopsTopic;
-
-  const filtered = appDB.workshops.filter(w => {
-    const matchQ = (w.title + " " + (w.statement || "") + " " + (w.finalAnswer || "")).toLowerCase().includes(q);
-    const matchTopic = topicFilter === "all" || w.topicId === topicFilter;
-    return matchQ && matchTopic;
+  container.querySelectorAll(".btn-edit-topic").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      openTopicModal(btn.getAttribute("data-topic-id"));
+    };
   });
-
-  if (filtered.length === 0) {
-    container.innerHTML = "";
-    if (empty) empty.classList.remove("hidden");
-  } else {
-    if (empty) empty.classList.add("hidden");
-    container.innerHTML = filtered.map(w => `
-      <div class="activity-card">
-        <div class="activity-card-top">
-          <span class="activity-type-badge taller">📝 Taller</span>
-          <span class="activity-date">${w.date || "Sin fecha"}</span>
-        </div>
-        <span class="topic-tag">${escapeHTML(getTopicTitleById(w.topicId))}</span>
-        <h4 class="activity-card-title">${escapeHTML(w.title)}</h4>
-        <p class="activity-card-body">${escapeHTML(w.statement || "Sin enunciado.")}</p>
-        ${w.finalAnswer ? `
-          <div class="highlight-box" style="margin-bottom: 12px; font-size: 12.5px;">
-            <strong>Respuesta:</strong> ${escapeHTML(w.finalAnswer)}
-          </div>
-        ` : ''}
-        <div class="activity-card-foot">
-          <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('workshop', '${escapeHTML(w.id)}')">Ver desarrollo</button>
-          <div class="topic-card-actions-right">
-            <button class="icon-action-btn" title="Editar taller" onclick="openWorkshopModal('${escapeHTML(w.id)}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-            </button>
-            <button class="icon-action-btn delete" title="Eliminar taller" onclick="confirmDelete('workshop', '${escapeHTML(w.id)}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-    `).join("");
-  }
-}
-
-// ============================================================================
-// 5. RENDERIZADO DE PARCIALES Y CORRECCIONES
-// ============================================================================
-
-function renderParciales() {
-  const container = document.getElementById("examsGrid");
-  const empty = document.getElementById("examsEmptyState");
-  if (!container) return;
-
-  const q = (filters.examsSearch || "").trim().toLowerCase();
-  const topicFilter = filters.examsTopic;
-
-  const filtered = appDB.exams.filter(e => {
-    const matchQ = (e.title + " " + (e.statement || "") + " " + (e.identifiedError || "")).toLowerCase().includes(q);
-    const matchTopic = topicFilter === "all" || e.topicId === topicFilter;
-    return matchQ && matchTopic;
+  container.querySelectorAll(".btn-delete-topic").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      confirmDelete("topic", btn.getAttribute("data-topic-id"));
+    };
   });
-
-  if (filtered.length === 0) {
-    container.innerHTML = "";
-    if (empty) empty.classList.remove("hidden");
-  } else {
-    if (empty) empty.classList.add("hidden");
-    container.innerHTML = filtered.map(e => `
-      <div class="activity-card">
-        <div class="activity-card-top">
-          <span class="activity-type-badge parcial">🎯 Parcial</span>
-          <span class="activity-date">${e.date || "Sin fecha"}</span>
-        </div>
-        <span class="topic-tag">${escapeHTML(getTopicTitleById(e.topicId))}</span>
-        <h4 class="activity-card-title">${escapeHTML(e.title)}</h4>
-        <p class="activity-card-body">${escapeHTML(e.statement || "Sin enunciado.")}</p>
-        ${e.identifiedError ? `
-          <div class="error-diagnosis-box" style="margin-bottom: 12px; font-size: 12px; padding: 10px 12px;">
-            <strong>⚠️ Error diagnosticado:</strong> ${escapeHTML(e.identifiedError)}
-          </div>
-        ` : ''}
-        <div class="activity-card-foot">
-          <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('exam', '${escapeHTML(e.id)}')">Ver corrección</button>
-          <div class="topic-card-actions-right">
-            <button class="icon-action-btn" title="Editar corrección" onclick="openExamModal('${escapeHTML(e.id)}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-            </button>
-            <button class="icon-action-btn delete" title="Eliminar examen" onclick="confirmDelete('exam', '${escapeHTML(e.id)}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-    `).join("");
-  }
 }
-
-// ============================================================================
-// 6. RENDERIZADO DE MI APRENDIZAJE (METACOGNICIÓN)
-// ============================================================================
-
-function renderAprendizaje() {
-  const container = document.getElementById("learningsGrid");
-  const empty = document.getElementById("learningsEmptyState");
-  if (!container) return;
-
-  const q = (filters.learningsSearch || "").trim().toLowerCase();
-  const topicFilter = filters.learningsTopic;
-
-  const filtered = appDB.learnings.filter(l => {
-    const matchQ = (l.title + " " + (l.difficulty || "") + " " + (l.whatILearned || "")).toLowerCase().includes(q);
-    const matchTopic = topicFilter === "all" || l.topicId === topicFilter;
-    return matchQ && matchTopic;
-  });
-
-  if (filtered.length === 0) {
-    container.innerHTML = "";
-    if (empty) empty.classList.remove("hidden");
-  } else {
-    if (empty) empty.classList.add("hidden");
-    container.innerHTML = filtered.map(l => `
-      <div class="activity-card">
-        <div class="activity-card-top">
-          <span class="activity-type-badge aprendizaje">✦ Metacognición</span>
-        </div>
-        <span class="topic-tag">${escapeHTML(getTopicTitleById(l.topicId))}</span>
-        <h4 class="activity-card-title">${escapeHTML(l.title)}</h4>
-        <div class="activity-card-body">
-          <p><strong>1. Dificultad:</strong> ${escapeHTML(l.difficulty || "No indicada")}</p>
-          <p style="margin-top: 6px;"><strong>5. Qué aprendí:</strong> ${escapeHTML(l.whatILearned || "No indicado")}</p>
-        </div>
-        <div class="activity-card-foot">
-          <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('learning', '${escapeHTML(l.id)}')">Ver reflexión completa</button>
-          <div class="topic-card-actions-right">
-            <button class="icon-action-btn" title="Editar situación" onclick="openLearningModal('${escapeHTML(l.id)}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-            </button>
-            <button class="icon-action-btn delete" title="Eliminar situación" onclick="confirmDelete('learning', '${escapeHTML(l.id)}')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-    `).join("");
-  }
-}
-
-// ============================================================================
-// 7. VISTA DETALLE DEL TEMA (CON EDICIÓN MODULAR DE CADA SECCIÓN)
-// ============================================================================
 
 function showTopicDetail(topicId) {
   activeDetailTopicId = topicId;
   navigateToView("detail");
 }
+
+// ============================================================================
+// VISTA DETALLE DEL TEMA — ÚNICAMENTE 4 SECCIONES Y TARJETAS FLEXIBLES
+// ============================================================================
 
 function renderTopicDetail(topicId) {
   const topic = appDB.topics.find(t => t.id === topicId);
@@ -1309,11 +1173,10 @@ function renderTopicDetail(topicId) {
     return;
   }
 
-  // Actividades vinculadas a este tema
-  const topicPractices = appDB.practices.filter(p => p.topicId === topic.id);
-  const topicWorkshops = appDB.workshops.filter(w => w.topicId === topic.id);
-  const topicExams = appDB.exams.filter(e => e.topicId === topic.id);
-  const topicLearnings = appDB.learnings.filter(l => l.topicId === topic.id);
+  const defCount = (topic.definitions && topic.definitions.length) || 0;
+  const formCount = (topic.formulas && topic.formulas.length) || 0;
+  const metaCount = (topic.metacognition && topic.metacognition.length) || 0;
+  const eviCount = (topic.evidencias && topic.evidencias.length) || 0;
 
   const statusSlug = (topic.status || "pendiente").toLowerCase().replace(/\s+/g, "-");
 
@@ -1328,382 +1191,133 @@ function renderTopicDetail(topicId) {
       <p class="detail-topic-desc">${escapeHTML(topic.description || "Sin descripción registrada.")}</p>
     </div>
 
-    <!-- Pestañas internas del detalle del tema -->
+    <!-- Pestañas internas exclusivas: Definiciones, Fórmulas, Metacognición, Evidencias -->
     <div class="detail-tabs-bar" id="topicDetailSubTabs">
-      <button class="detail-tab-btn active" data-subtab="sub-conceptos">
-        <span>📑</span> Esquema & Definiciones
-        <span class="detail-tab-badge">${(topic.definitions && topic.definitions.length) || 0}</span>
+      <button class="detail-tab-btn ${activeDetailSubtab === 'sub-definiciones' ? 'active' : ''}" data-subtab="sub-definiciones">
+        <span>📖</span> 1. Definiciones
+        <span class="detail-tab-badge">${defCount}</span>
       </button>
-      <button class="detail-tab-btn" data-subtab="sub-formulas">
-        <span>𝚺</span> Fórmulas y Modelos
-        <span class="detail-tab-badge">${(topic.formulas && topic.formulas.length) || 0}</span>
+      <button class="detail-tab-btn ${activeDetailSubtab === 'sub-formulas' ? 'active' : ''}" data-subtab="sub-formulas">
+        <span>𝚺</span> 2. Fórmulas
+        <span class="detail-tab-badge">${formCount}</span>
       </button>
-      <button class="detail-tab-btn" data-subtab="sub-practicas">
-        <span>🧪</span> Prácticas del Tema
-        <span class="detail-tab-badge">${topicPractices.length}</span>
+      <button class="detail-tab-btn ${activeDetailSubtab === 'sub-metacognicion' ? 'active' : ''}" data-subtab="sub-metacognicion">
+        <span>✦</span> 3. Metacognición
+        <span class="detail-tab-badge">${metaCount}</span>
       </button>
-      <button class="detail-tab-btn" data-subtab="sub-talleres">
-        <span>📝</span> Talleres del Tema
-        <span class="detail-tab-badge">${topicWorkshops.length}</span>
-      </button>
-      <button class="detail-tab-btn" data-subtab="sub-parciales">
-        <span>🎯</span> Parciales del Tema
-        <span class="detail-tab-badge">${topicExams.length}</span>
-      </button>
-      <button class="detail-tab-btn" data-subtab="sub-aprendizaje">
-        <span>✦</span> Metacognición
-        <span class="detail-tab-badge">${topicLearnings.length}</span>
-      </button>
-      <button class="detail-tab-btn" data-subtab="sub-evidencias">
-        <span>📂</span> Evidencias
+      <button class="detail-tab-btn ${activeDetailSubtab === 'sub-evidencias' ? 'active' : ''}" data-subtab="sub-evidencias">
+        <span>📂</span> 4. Evidencias
+        <span class="detail-tab-badge">${eviCount}</span>
       </button>
     </div>
   `;
 
-  // SUB-TAB 1: ESQUEMA CONCEPTUAL & DEFINICIONES
+  // 1. PESTAÑA: DEFINICIONES
   html += `
-    <div class="detail-tab-pane active" id="sub-conceptos">
+    <div class="detail-tab-pane ${activeDetailSubtab === 'sub-definiciones' ? 'active' : ''}" id="sub-definiciones">
       <div class="academic-section-card">
         <div class="section-action-header">
-          <h3><span>📖</span> Esquema Conceptual General</h3>
-          <button class="btn btn-outline btn-sm" onclick="openTopicModal('${escapeHTML(topic.id)}')">
-            ✎ Modificar esquema o mapa
-          </button>
-        </div>
-        <div class="detail-field-group">
-          <p>${topic.conceptualScheme ? escapeHTML(topic.conceptualScheme) : "<em>No se ha registrado esquema explicativo para este tema.</em>"}</p>
-        </div>
-
-        ${topic.mapFile ? `
-          <div style="margin-top: 20px;">
-            <strong>Mapa Conceptual Gráfico:</strong>
-            <div class="evidence-gallery" style="margin-top: 10px;">
-              <div class="evidence-thumbnail-card" onclick="openFileViewer('${escapeHTML(topic.mapFile.name)}', '${escapeHTML(topic.mapFile.type)}', '${topic.mapFile.data}')">
-                <div class="evidence-thumb-img-wrap">
-                  ${topic.mapFile.type && topic.mapFile.type.startsWith("image/") ? `<img src="${topic.mapFile.data}" alt="Mapa">` : '<span class="doc-icon">📄</span>'}
-                </div>
-                <div class="evidence-thumb-info">
-                  <span class="evidence-thumb-name">${escapeHTML(topic.mapFile.name)}</span>
-                  <span class="evidence-thumb-meta">Mapa conceptual</span>
-                </div>
-              </div>
-            </div>
+          <div>
+            <h3><span>📖</span> Definiciones Conceptuales (${defCount})</h3>
+            <p class="text-muted" style="font-size: 13px;">Tarjetas con conceptos clave, explicaciones y diagramas opcionales.</p>
           </div>
-        ` : ''}
-      </div>
-
-      <!-- Definiciones individuales con agregar, editar y eliminar -->
-      <div class="academic-section-card">
-        <div class="section-action-header">
-          <h3><span>📝</span> Definiciones Conceptuales (${(topic.definitions && topic.definitions.length) || 0})</h3>
-          <button class="btn btn-primary btn-sm" onclick="openDefinitionModal(null, '${escapeHTML(topic.id)}')">
-            ＋ Agregar Definición
+          <button class="btn btn-primary btn-sm" onclick="openCardModal('definitions', null, '${escapeHTML(topic.id)}')">
+            ＋ Nueva Definición
           </button>
         </div>
 
-        ${(!topic.definitions || topic.definitions.length === 0) ? `
+        ${defCount === 0 ? `
           <div class="empty-state" style="padding: 30px;">
             <p>No hay definiciones registradas aún para este tema.</p>
-            <button class="btn btn-outline btn-sm" onclick="openDefinitionModal(null, '${escapeHTML(topic.id)}')">＋ Registrar primera definición</button>
+            <button class="btn btn-outline btn-sm" onclick="openCardModal('definitions', null, '${escapeHTML(topic.id)}')">＋ Crear primera definición</button>
           </div>
         ` : `
-          <div class="definitions-stack">
-            ${topic.definitions.map(d => `
-              <div class="definition-card">
-                <div>
-                  <h4 class="definition-term">${escapeHTML(d.term)}</h4>
-                  <p class="definition-text">${escapeHTML(d.definition)}</p>
-                </div>
-                <div class="topic-card-actions-right">
-                  <button class="icon-action-btn" title="Editar definición" onclick="openDefinitionModal('${escapeHTML(d.id)}', '${escapeHTML(topic.id)}')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                  </button>
-                  <button class="icon-action-btn delete" title="Eliminar definición" onclick="confirmDelete('definition', '${escapeHTML(d.id)}', '${escapeHTML(topic.id)}')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                  </button>
-                </div>
-              </div>
-            `).join("")}
+          <div class="topic-cards-grid">
+            ${topic.definitions.map(c => createAcademicCardHTML(c, 'definitions', topic.id)).join("")}
           </div>
         `}
       </div>
     </div>
   `;
 
-  // SUB-TAB 2: FÓRMULAS MATEMÁTICAS CON KATEX
+  // 2. PESTAÑA: FÓRMULAS
   html += `
-    <div class="detail-tab-pane" id="sub-formulas">
+    <div class="detail-tab-pane ${activeDetailSubtab === 'sub-formulas' ? 'active' : ''}" id="sub-formulas">
       <div class="academic-section-card">
         <div class="section-action-header">
-          <h3><span>𝚺</span> Fórmulas y Modelos Matemáticos (${(topic.formulas && topic.formulas.length) || 0})</h3>
-          <button class="btn btn-primary btn-sm" onclick="openFormulaModal(null, '${escapeHTML(topic.id)}')">
-            ＋ Agregar Fórmula
+          <div>
+            <h3><span>𝚺</span> Fórmulas y Modelos Matemáticos (${formCount})</h3>
+            <p class="text-muted" style="font-size: 13px;">Expresiones matemáticas con renderizado KaTeX, explicaciones y condiciones de validez.</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openCardModal('formulas', null, '${escapeHTML(topic.id)}')">
+            ＋ Nueva Fórmula
           </button>
         </div>
 
-        ${(!topic.formulas || topic.formulas.length === 0) ? `
+        ${formCount === 0 ? `
           <div class="empty-state" style="padding: 30px;">
             <p>No se han registrado fórmulas matemáticas en este tema.</p>
-            <button class="btn btn-outline btn-sm" onclick="openFormulaModal(null, '${escapeHTML(topic.id)}')">＋ Registrar primera fórmula</button>
+            <button class="btn btn-outline btn-sm" onclick="openCardModal('formulas', null, '${escapeHTML(topic.id)}')">＋ Crear primera fórmula</button>
           </div>
         ` : `
-          <div class="formulas-grid">
-            ${topic.formulas.map(f => `
-              <div class="formula-card">
-                <div class="formula-card-header">
-                  <span class="formula-card-title">${escapeHTML(f.name)}</span>
-                </div>
-                <div class="formula-display-box">
-                  ${formatLatex(f.latex, true)}
-                </div>
-                ${f.variables ? `
-                  <div class="formula-meta-group">
-                    <strong>Variables y Unidades (SI):</strong>
-                    <p>${escapeHTML(f.variables)}</p>
-                  </div>
-                ` : ''}
-                ${f.conditions ? `
-                  <div class="formula-meta-group">
-                    <strong>Condiciones de Aplicación:</strong>
-                    <p>${escapeHTML(f.conditions)}</p>
-                  </div>
-                ` : ''}
-                ${f.example ? `
-                  <div class="formula-meta-group">
-                    <strong>Ejemplo de Cálculo:</strong>
-                    <p>${escapeHTML(f.example)}</p>
-                  </div>
-                ` : ''}
-                <div class="formula-card-footer">
-                  <button class="icon-action-btn" title="Editar fórmula" onclick="openFormulaModal('${escapeHTML(f.id)}', '${escapeHTML(topic.id)}')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                  </button>
-                  <button class="icon-action-btn delete" title="Eliminar fórmula" onclick="confirmDelete('formula', '${escapeHTML(f.id)}', '${escapeHTML(topic.id)}')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                  </button>
-                </div>
-              </div>
-            `).join("")}
+          <div class="topic-cards-grid">
+            ${topic.formulas.map(c => createAcademicCardHTML(c, 'formulas', topic.id)).join("")}
           </div>
         `}
       </div>
     </div>
   `;
 
-  // SUB-TAB 3: PRÁCTICAS DEL TEMA
+  // 3. PESTAÑA: METACOGNICIÓN
   html += `
-    <div class="detail-tab-pane" id="sub-practicas">
+    <div class="detail-tab-pane ${activeDetailSubtab === 'sub-metacognicion' ? 'active' : ''}" id="sub-metacognicion">
       <div class="academic-section-card">
         <div class="section-action-header">
-          <h3><span>🧪</span> Prácticas de Laboratorio Asociadas</h3>
-          <button class="btn btn-primary btn-sm" onclick="openPracticeModal(null, '${escapeHTML(topic.id)}')">
-            ＋ Registrar Práctica para este tema
+          <div>
+            <h3><span>✦</span> Metacognición y Situaciones de Aprendizaje (${metaCount})</h3>
+            <p class="text-muted" style="font-size: 13px;">Bitácora de dificultades superadas, reflexiones y estrategias aplicadas en este tema.</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openCardModal('metacognition', null, '${escapeHTML(topic.id)}')">
+            ＋ Nueva Reflexión
           </button>
         </div>
 
-        ${topicPractices.length === 0 ? `
+        ${metaCount === 0 ? `
           <div class="empty-state" style="padding: 30px;">
-            <p>Aún no hay prácticas de laboratorio vinculadas a este tema.</p>
-            <button class="btn btn-outline btn-sm" onclick="openPracticeModal(null, '${escapeHTML(topic.id)}')">＋ Crear práctica</button>
+            <p>No has registrado reflexiones metacognitivas para este tema.</p>
+            <button class="btn btn-outline btn-sm" onclick="openCardModal('metacognition', null, '${escapeHTML(topic.id)}')">＋ Registrar primera reflexión</button>
           </div>
         ` : `
-          <div class="cards-activity-grid">
-            ${topicPractices.map(p => `
-              <div class="activity-card">
-                <div class="activity-card-top">
-                  <span class="activity-type-badge practica">🧪 Práctica</span>
-                  <span class="activity-date">${p.date || ""}</span>
-                </div>
-                <h4 class="activity-card-title">${escapeHTML(p.title)}</h4>
-                <p class="activity-card-body">${escapeHTML(p.statement || p.objectives || "")}</p>
-                <div class="activity-card-foot">
-                  <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('practice', '${escapeHTML(p.id)}')">Ver detalle</button>
-                  <div class="topic-card-actions-right">
-                    <button class="icon-action-btn" title="Editar práctica" onclick="openPracticeModal('${escapeHTML(p.id)}')">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                    </button>
-                    <button class="icon-action-btn delete" title="Eliminar práctica" onclick="confirmDelete('practice', '${escapeHTML(p.id)}')">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            `).join("")}
+          <div class="topic-cards-grid">
+            ${topic.metacognition.map(c => createAcademicCardHTML(c, 'metacognition', topic.id)).join("")}
           </div>
         `}
       </div>
     </div>
   `;
 
-  // SUB-TAB 4: TALLERES DEL TEMA
+  // 4. PESTAÑA: EVIDENCIAS
   html += `
-    <div class="detail-tab-pane" id="sub-talleres">
+    <div class="detail-tab-pane ${activeDetailSubtab === 'sub-evidencias' ? 'active' : ''}" id="sub-evidencias">
       <div class="academic-section-card">
         <div class="section-action-header">
-          <h3><span>📝</span> Talleres y Ejercicios Resueltos</h3>
-          <button class="btn btn-primary btn-sm" onclick="openWorkshopModal(null, '${escapeHTML(topic.id)}')">
-            ＋ Registrar Taller para este tema
+          <div>
+            <h3><span>📂</span> Evidencias y Recursos del Tema (${eviCount})</h3>
+            <p class="text-muted" style="font-size: 13px;">Mapas conceptuales, apuntes gráficos, fotos de pizarrón y esquemas del tema.</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openCardModal('evidencias', null, '${escapeHTML(topic.id)}')">
+            ＋ Nueva Evidencia
           </button>
         </div>
 
-        ${topicWorkshops.length === 0 ? `
+        ${eviCount === 0 ? `
           <div class="empty-state" style="padding: 30px;">
-            <p>No se han registrado talleres vinculados a este tema.</p>
-            <button class="btn btn-outline btn-sm" onclick="openWorkshopModal(null, '${escapeHTML(topic.id)}')">＋ Crear taller</button>
+            <p>No hay evidencias gráficas añadidas a este tema.</p>
+            <button class="btn btn-outline btn-sm" onclick="openCardModal('evidencias', null, '${escapeHTML(topic.id)}')">＋ Adjuntar primera evidencia</button>
           </div>
         ` : `
-          <div class="cards-activity-grid">
-            ${topicWorkshops.map(w => `
-              <div class="activity-card">
-                <div class="activity-card-top">
-                  <span class="activity-type-badge taller">📝 Taller</span>
-                  <span class="activity-date">${w.date || ""}</span>
-                </div>
-                <h4 class="activity-card-title">${escapeHTML(w.title)}</h4>
-                <p class="activity-card-body">${escapeHTML(w.statement || "")}</p>
-                <div class="activity-card-foot">
-                  <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('workshop', '${escapeHTML(w.id)}')">Ver desarrollo</button>
-                  <div class="topic-card-actions-right">
-                    <button class="icon-action-btn" title="Editar taller" onclick="openWorkshopModal('${escapeHTML(w.id)}')">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                    </button>
-                    <button class="icon-action-btn delete" title="Eliminar taller" onclick="confirmDelete('workshop', '${escapeHTML(w.id)}')">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            `).join("")}
-          </div>
-        `}
-      </div>
-    </div>
-  `;
-
-  // SUB-TAB 5: PARCIALES DEL TEMA
-  html += `
-    <div class="detail-tab-pane" id="sub-parciales">
-      <div class="academic-section-card">
-        <div class="section-action-header">
-          <h3><span>🎯</span> Evaluaciones Parciales y Correcciones</h3>
-          <button class="btn btn-primary btn-sm" onclick="openExamModal(null, '${escapeHTML(topic.id)}')">
-            ＋ Registrar Parcial para este tema
-          </button>
-        </div>
-
-        ${topicExams.length === 0 ? `
-          <div class="empty-state" style="padding: 30px;">
-            <p>No hay evaluaciones parciales vinculadas a este tema.</p>
-            <button class="btn btn-outline btn-sm" onclick="openExamModal(null, '${escapeHTML(topic.id)}')">＋ Registrar examen corregido</button>
-          </div>
-        ` : `
-          <div class="cards-activity-grid">
-            ${topicExams.map(e => `
-              <div class="activity-card">
-                <div class="activity-card-top">
-                  <span class="activity-type-badge parcial">🎯 Parcial</span>
-                  <span class="activity-date">${e.date || ""}</span>
-                </div>
-                <h4 class="activity-card-title">${escapeHTML(e.title)}</h4>
-                <p class="activity-card-body">${escapeHTML(e.statement || "")}</p>
-                ${e.identifiedError ? `
-                  <div class="error-diagnosis-box" style="margin-bottom: 12px; font-size: 12px;">
-                    <strong>⚠️ Error:</strong> ${escapeHTML(e.identifiedError)}
-                  </div>
-                ` : ''}
-                <div class="activity-card-foot">
-                  <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('exam', '${escapeHTML(e.id)}')">Ver corrección</button>
-                  <div class="topic-card-actions-right">
-                    <button class="icon-action-btn" title="Editar parcial" onclick="openExamModal('${escapeHTML(e.id)}')">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                    </button>
-                    <button class="icon-action-btn delete" title="Eliminar examen" onclick="confirmDelete('exam', '${escapeHTML(e.id)}')">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            `).join("")}
-          </div>
-        `}
-      </div>
-    </div>
-  `;
-
-  // SUB-TAB 6: METACOGNICIÓN DEL TEMA
-  html += `
-    <div class="detail-tab-pane" id="sub-aprendizaje">
-      <div class="academic-section-card">
-        <div class="section-action-header">
-          <h3><span>✦</span> Situaciones de Aprendizaje y Dificultades Superadas</h3>
-          <button class="btn btn-primary btn-sm" onclick="openLearningModal(null, '${escapeHTML(topic.id)}')">
-            ＋ Registrar Nueva Situación
-          </button>
-        </div>
-
-        ${topicLearnings.length === 0 ? `
-          <div class="empty-state" style="padding: 30px;">
-            <p>No se han registrado situaciones metacognitivas para este tema.</p>
-            <button class="btn btn-outline btn-sm" onclick="openLearningModal(null, '${escapeHTML(topic.id)}')">＋ Registrar reflexión</button>
-          </div>
-        ` : `
-          <div class="cards-activity-grid">
-            ${topicLearnings.map(l => `
-              <div class="activity-card">
-                <div class="activity-card-top">
-                  <span class="activity-type-badge aprendizaje">✦ Metacognición</span>
-                </div>
-                <h4 class="activity-card-title">${escapeHTML(l.title)}</h4>
-                <div class="activity-card-body">
-                  <p><strong>Dificultad:</strong> ${escapeHTML(l.difficulty || "")}</p>
-                  <p style="margin-top: 6px;"><strong>Qué aprendí:</strong> ${escapeHTML(l.whatILearned || "")}</p>
-                </div>
-                <div class="activity-card-foot">
-                  <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('learning', '${escapeHTML(l.id)}')">Ver completa</button>
-                  <div class="topic-card-actions-right">
-                    <button class="icon-action-btn" title="Editar reflexión" onclick="openLearningModal('${escapeHTML(l.id)}')">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                    </button>
-                    <button class="icon-action-btn delete" title="Eliminar situación" onclick="confirmDelete('learning', '${escapeHTML(l.id)}')">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            `).join("")}
-          </div>
-        `}
-      </div>
-    </div>
-  `;
-
-  // SUB-TAB 7: EVIDENCIAS
-  const allTopicFiles = [];
-  if (topic.mapFile) allTopicFiles.push({ file: topic.mapFile, label: "Mapa conceptual" });
-  topicPractices.forEach(p => (p.files || []).forEach(f => allTopicFiles.push({ file: f, label: p.title })));
-  topicWorkshops.forEach(w => (w.files || []).forEach(f => allTopicFiles.push({ file: f, label: w.title })));
-  topicExams.forEach(e => (e.files || []).forEach(f => allTopicFiles.push({ file: f, label: e.title })));
-  topicLearnings.forEach(l => (l.files || []).forEach(f => allTopicFiles.push({ file: f, label: l.title })));
-
-  html += `
-    <div class="detail-tab-pane" id="sub-evidencias">
-      <div class="academic-section-card">
-        <h3><span>📂</span> Todas las Evidencias Adjuntas del Tema</h3>
-        ${allTopicFiles.length === 0 ? `
-          <p class="text-muted"><em>No hay imágenes o documentos adjuntos para este tema ni sus actividades.</em></p>
-        ` : `
-          <div class="evidence-gallery">
-            ${allTopicFiles.map(item => `
-              <div class="evidence-thumbnail-card" onclick="openFileViewer('${escapeHTML(item.file.name)}', '${escapeHTML(item.file.type)}', '${item.file.data}')">
-                <div class="evidence-thumb-img-wrap">
-                  ${item.file.type && item.file.type.startsWith("image/") ? `<img src="${item.file.data}" alt="Foto">` : '<span class="doc-icon">📄</span>'}
-                </div>
-                <div class="evidence-thumb-info">
-                  <span class="evidence-thumb-name">${escapeHTML(item.file.name)}</span>
-                  <span class="evidence-thumb-meta">${escapeHTML(item.label)}</span>
-                </div>
-              </div>
-            `).join("")}
+          <div class="topic-cards-grid">
+            ${topic.evidencias.map(c => createAcademicCardHTML(c, 'evidencias', topic.id)).join("")}
           </div>
         `}
       </div>
@@ -1712,1502 +1326,1432 @@ function renderTopicDetail(topicId) {
 
   container.innerHTML = html;
 
-  // Renderizar fórmulas con KaTeX
+  // Renderizar KaTeX en fórmulas de las tarjetas
   renderKaTeX(container);
 
-  // Enlazar pestañas internas
-  const tabBtns = container.querySelectorAll(".detail-tab-btn");
-  tabBtns.forEach(btn => {
+  // Escuchar cambio de pestañas internas
+  container.querySelectorAll(".detail-tab-btn").forEach(btn => {
     btn.onclick = () => {
-      tabBtns.forEach(b => b.classList.remove("active"));
+      container.querySelectorAll(".detail-tab-btn").forEach(b => b.classList.remove("active"));
+      container.querySelectorAll(".detail-tab-pane").forEach(p => p.classList.remove("active"));
       btn.classList.add("active");
       const targetSubtab = btn.getAttribute("data-subtab");
-      container.querySelectorAll(".detail-tab-pane").forEach(pane => {
-        pane.classList.toggle("active", pane.id === targetSubtab);
-      });
+      activeDetailSubtab = targetSubtab;
+      const targetPane = document.getElementById(targetSubtab);
+      if (targetPane) targetPane.classList.add("active");
     };
   });
-
-  // Botones de cabecera del tema
-  document.getElementById("detailEditTopicBtn").onclick = () => openTopicModal(topic.id);
-  document.getElementById("detailDeleteTopicBtn").onclick = () => confirmDelete("topic", topic.id);
 }
 
-// ============================================================================
-// 8. MODALES DE EDICIÓN Y CREACIÓN (CRUD INDIVIDUALIZADO)
-// ============================================================================
+/**
+ * Genera el HTML de una tarjeta académica completamente flexible
+ * Soporta: solo texto, solo imagen, título+imagen, título+texto+imagen, etc.
+ */
+function createAcademicCardHTML(card, section, topicId) {
+  const hasImage = Boolean(card.imageData);
+  const hasTitle = Boolean(card.title && card.title.trim());
+  const hasText = Boolean(card.text && card.text.trim());
+  const hasLatex = Boolean(card.latex && card.latex.trim());
 
-function openModal(modalId) {
-  const modal = document.getElementById(modalId);
-  if (!modal) return;
-  modal.classList.add("active");
-  // Asegurar scroll inicial al tope del formulario
-  const body = modal.querySelector(".modal-body");
-  if (body) body.scrollTop = 0;
-}
-
-function closeModal(modalId) {
-  const modal = document.getElementById(modalId);
-  if (modal) modal.classList.remove("active");
-}
-
-// --- A. MODAL TEMA ---
-let pendingTopicMapFile = null;
-
-function openTopicModal(topicId = null) {
-  const title = document.getElementById("topicModalTitle");
-  const form = document.getElementById("topicForm");
-  form.reset();
-  pendingTopicMapFile = null;
-
-  if (topicId) {
-    const t = appDB.topics.find(x => x.id === topicId);
-    if (!t) return;
-    title.textContent = `Editar Tema: ${t.title}`;
-    document.getElementById("topicFormId").value = t.id;
-    document.getElementById("topicFormTitle").value = t.title || "";
-    document.getElementById("topicFormOrder").value = t.order || 1;
-    document.getElementById("topicFormStatus").value = t.status || "En progreso";
-    document.getElementById("topicFormHours").value = t.estimatedHours || "";
-    document.getElementById("topicFormDesc").value = t.description || "";
-    document.getElementById("topicFormConceptual").value = t.conceptualScheme || "";
-    pendingTopicMapFile = t.mapFile || null;
-  } else {
-    title.textContent = "Registrar Nuevo Tema Académico";
-    document.getElementById("topicFormId").value = "";
-    document.getElementById("topicFormOrder").value = appDB.topics.length + 1;
-    document.getElementById("topicFormStatus").value = "En progreso";
+  let imageBlock = "";
+  if (hasImage) {
+    imageBlock = `
+      <div class="card-media-wrap" onclick="openFileViewer('${escapeHTML(card.title || 'Imagen')}', 'image/jpeg', '${card.imageData}')">
+        <img src="${card.imageData}" alt="${escapeHTML(card.title || 'Evidencia')}" loading="lazy">
+        <span class="card-media-overlay-zoom">🔍 Ampliar</span>
+      </div>
+    `;
   }
 
-  renderTopicMapPreview();
-  openModal("topicModal");
-}
-
-function renderTopicMapPreview() {
-  const container = document.getElementById("topicMapFilePreview");
-  if (!container) return;
-  if (!pendingTopicMapFile) {
-    container.innerHTML = "";
-    return;
+  let mathBlock = "";
+  if (hasLatex) {
+    mathBlock = `
+      <div class="card-academic-latex-wrap">
+        <div class="katex-rendered-box">
+          ${formatLatex(card.latex, true)}
+        </div>
+      </div>
+    `;
   }
-  container.innerHTML = `
-    <div class="attached-item-chip">
-      <span>📄</span>
-      <span class="attached-item-name">${escapeHTML(pendingTopicMapFile.name)}</span>
-      <button type="button" class="attached-item-remove-btn" onclick="removePendingTopicMap()">✕</button>
+
+  return `
+    <div class="topic-academic-card" id="card-el-${escapeHTML(card.id)}">
+      ${imageBlock}
+      <div class="card-content-body">
+        ${hasTitle ? `<h4 class="card-academic-title">${escapeHTML(card.title)}</h4>` : ''}
+        ${mathBlock}
+        ${hasText ? `<div class="card-academic-text">${escapeHTML(card.text)}</div>` : ''}
+      </div>
+      <div class="card-academic-footer">
+        <span class="card-academic-date">Guardado auto</span>
+        <div class="card-academic-actions">
+          <button class="btn btn-outline btn-sm" onclick="openCardModal('${section}', '${escapeHTML(card.id)}', '${escapeHTML(topicId)}')">
+            ✎ Editar
+          </button>
+          <button class="icon-action-btn delete" title="Eliminar tarjeta" onclick="confirmDelete('card', '${escapeHTML(card.id)}', { topicId: '${escapeHTML(topicId)}', section: '${section}' })">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          </button>
+        </div>
+      </div>
     </div>
   `;
 }
 
-function removePendingTopicMap() {
-  pendingTopicMapFile = null;
-  renderTopicMapPreview();
-}
+// ============================================================================
+// MODAL EDITOR DE TARJETA FLEXIBLE CON GUARDADO EN TIEMPO REAL
+// ============================================================================
 
-// --- B. MODAL DEFINICIÓN ---
-function openDefinitionModal(defId = null, defaultTopicId = null) {
-  const title = document.getElementById("defModalTitle");
-  const form = document.getElementById("definitionForm");
-  form.reset();
+let currentActiveCard = null;
 
-  populateTopicSelects();
-  const select = document.getElementById("defFormTopicSelect");
+function openCardModal(section, cardId = null, topicId = null) {
+  const topic = appDB.topics.find(t => t.id === topicId);
+  if (!topic) return;
 
-  if (defaultTopicId && select) {
-    select.value = defaultTopicId;
+  const sectionArray = topic[section];
+  if (!Array.isArray(sectionArray)) topic[section] = [];
+
+  let card = null;
+  let isNew = false;
+
+  if (cardId) {
+    card = topic[section].find(c => c.id === cardId);
   }
 
-  if (defId) {
-    title.textContent = "Editar Definición";
-    document.getElementById("defFormId").value = defId;
+  if (!card) {
+    isNew = true;
+    card = {
+      id: generateUniqueId("card"),
+      title: "",
+      text: "",
+      latex: "",
+      imageData: null,
+      imageFileId: null,
+      imageName: null
+    };
+    topic[section].unshift(card);
+    scheduleAutoSave(0); // Guardado inmediato del nuevo registro
+  }
 
-    // Buscar en todos los temas
-    for (const t of appDB.topics) {
-      const found = (t.definitions || []).find(d => d.id === defId);
-      if (found) {
-        document.getElementById("defFormTerm").value = found.term || "";
-        document.getElementById("defFormDefinition").value = found.definition || "";
-        document.getElementById("defFormTopicId").value = t.id;
-        if (select) select.value = t.id;
-        break;
-      }
-    }
+  currentActiveCard = card;
+
+  // Llenar campos del modal
+  document.getElementById("cardEditorTopicId").value = topicId;
+  document.getElementById("cardEditorSection").value = section;
+  document.getElementById("cardEditorCardId").value = card.id;
+
+  const titleInput = document.getElementById("cardEditorTitle");
+  const textInput = document.getElementById("cardEditorText");
+  const latexInput = document.getElementById("cardEditorLatex");
+  const formulaGroup = document.getElementById("cardEditorFormulaGroup");
+
+  titleInput.value = card.title || "";
+  textInput.value = card.text || "";
+
+  if (section === "formulas") {
+    formulaGroup.classList.remove("hidden");
+    latexInput.value = card.latex || "";
+    updateCardEditorLatexPreview(card.latex || "");
   } else {
-    title.textContent = "Agregar Nueva Definición";
-    document.getElementById("defFormId").value = "";
-    document.getElementById("defFormTopicId").value = defaultTopicId || "";
+    formulaGroup.classList.add("hidden");
+    latexInput.value = "";
   }
 
-  openModal("definitionModal");
+  // Título e Icono del Modal según la sección
+  const icons = {
+    definitions: "📖 Definición",
+    formulas: "𝚺 Fórmula y Modelo",
+    metacognition: "✦ Metacognición",
+    evidencias: "📂 Evidencia Gráfica"
+  };
+  document.getElementById("cardEditorModalTitle").textContent = isNew
+    ? `Nueva Tarjeta (${icons[section] || 'Académica'})`
+    : `Editar Tarjeta (${icons[section] || 'Académica'})`;
+
+  renderCardEditorImageUI();
+
+  // Enlazar eventos de guardado en tiempo real al escribir
+  titleInput.oninput = () => {
+    card.title = titleInput.value;
+    scheduleAutoSave();
+  };
+
+  textInput.oninput = () => {
+    card.text = textInput.value;
+    scheduleAutoSave();
+  };
+
+  latexInput.oninput = () => {
+    card.latex = latexInput.value;
+    updateCardEditorLatexPreview(card.latex);
+    scheduleAutoSave();
+  };
+
+  // Selector de imagen nueva
+  const newImgInput = document.getElementById("cardEditorImageNewInput");
+  newImgInput.value = "";
+  newImgInput.onchange = (e) => handleCardImageUpload(e.target.files[0]);
+
+  // Selector de cambio de imagen
+  const changeImgInput = document.getElementById("cardEditorImageChangeInput");
+  changeImgInput.value = "";
+  changeImgInput.onchange = (e) => handleCardImageUpload(e.target.files[0]);
+
+  // Botón para quitar imagen
+  const removeImgBtn = document.getElementById("cardEditorRemoveImageBtn");
+  removeImgBtn.onclick = () => {
+    card.imageData = null;
+    card.imageFileId = null;
+    card.imageName = null;
+    renderCardEditorImageUI();
+    scheduleAutoSave(0);
+    showToast("Imagen eliminada de la tarjeta.", "info");
+  };
+
+  // Botón para eliminar tarjeta
+  const deleteBtn = document.getElementById("cardEditorDeleteBtn");
+  deleteBtn.onclick = () => {
+    closeModal("cardEditorModal");
+    confirmDelete("card", card.id, { topicId, section });
+  };
+
+  openModal("cardEditorModal");
 }
 
-// --- C. MODAL FÓRMULA ---
-function openFormulaModal(formulaId = null, defaultTopicId = null) {
-  const title = document.getElementById("formulaModalTitle");
-  const form = document.getElementById("formulaForm");
-  form.reset();
+function renderCardEditorImageUI() {
+  const currentWrap = document.getElementById("cardEditorImageCurrentWrap");
+  const uploadWrap = document.getElementById("cardEditorImageUploadWrap");
+  const previewImg = document.getElementById("cardEditorImageCurrentPreview");
 
-  populateTopicSelects();
-  const select = document.getElementById("formulaFormTopicSelect");
-  if (defaultTopicId && select) select.value = defaultTopicId;
-
-  if (formulaId) {
-    title.textContent = "Editar Fórmula Matemática";
-    document.getElementById("formulaFormId").value = formulaId;
-
-    for (const t of appDB.topics) {
-      const found = (t.formulas || []).find(f => f.id === formulaId);
-      if (found) {
-        document.getElementById("formulaFormName").value = found.name || "";
-        document.getElementById("formulaFormLatex").value = found.latex || "";
-        document.getElementById("formulaFormVars").value = found.variables || "";
-        document.getElementById("formulaFormConditions").value = found.conditions || "";
-        document.getElementById("formulaFormExample").value = found.example || "";
-        document.getElementById("formulaFormTopicId").value = t.id;
-        if (select) select.value = t.id;
-        updateFormulaLivePreview(found.latex);
-        break;
-      }
-    }
+  if (currentActiveCard && currentActiveCard.imageData) {
+    previewImg.src = currentActiveCard.imageData;
+    currentWrap.classList.remove("hidden");
+    uploadWrap.classList.add("hidden");
   } else {
-    title.textContent = "Agregar Nueva Fórmula Matemática";
-    document.getElementById("formulaFormId").value = "";
-    document.getElementById("formulaFormTopicId").value = defaultTopicId || "";
-    updateFormulaLivePreview("");
+    currentWrap.classList.add("hidden");
+    uploadWrap.classList.remove("hidden");
   }
-
-  openModal("formulaModal");
 }
 
-function updateFormulaLivePreview(latexCode) {
-  const box = document.getElementById("formulaFormKatexPreview");
-  if (!box) return;
-  if (!latexCode || !latexCode.trim()) {
-    box.innerHTML = '<span class="text-muted">Escribe código LaTeX arriba para previsualizar aquí.</span>';
+function handleCardImageUpload(file) {
+  if (!file || !currentActiveCard) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const dataUrl = e.target.result;
+    const fileId = generateUniqueId("img");
+
+    // Guardar en IndexedDB para persistencia segura de gran tamaño
+    await FileStorage.saveFile(fileId, file.name, file.type, file.size, dataUrl);
+
+    currentActiveCard.imageData = dataUrl;
+    currentActiveCard.imageFileId = fileId;
+    currentActiveCard.imageName = file.name;
+
+    renderCardEditorImageUI();
+    scheduleAutoSave(0);
+    showToast(`✓ Imagen "${file.name}" adjuntada y guardada.`, "success");
+  };
+  reader.readAsDataURL(file);
+}
+
+function updateCardEditorLatexPreview(code) {
+  const preview = document.getElementById("cardEditorLatexPreview");
+  if (!preview) return;
+  if (!code || !code.trim()) {
+    preview.innerHTML = `<span class="text-muted">Escribe código LaTeX arriba para previsualizar aquí en vivo.</span>`;
     return;
   }
-  box.innerHTML = formatLatex(latexCode, true);
+  preview.innerHTML = formatLatex(code, true);
 }
 
-// --- D. MODAL PRÁCTICA ---
-let pendingPracticeFiles = [];
+function insertLatexSnippet(snippet) {
+  const latexInput = document.getElementById("cardEditorLatex");
+  if (!latexInput || !currentActiveCard) return;
+  latexInput.value = (latexInput.value ? latexInput.value + " " : "") + snippet;
+  currentActiveCard.latex = latexInput.value;
+  updateCardEditorLatexPreview(currentActiveCard.latex);
+  scheduleAutoSave();
+  latexInput.focus();
+}
 
-function openPracticeModal(practiceId = null, defaultTopicId = null) {
-  const title = document.getElementById("practiceModalTitle");
-  const form = document.getElementById("practiceForm");
-  form.reset();
-  pendingPracticeFiles = [];
+// ============================================================================
+// VISTA 3: PRÁCTICAS DE LABORATORIO — GESTOR DE ARCHIVOS Y FOTOS SIMPLIFICADO
+// ============================================================================
 
-  populateTopicSelects();
-  const select = document.getElementById("practiceFormTopicSelect");
-  if (defaultTopicId && select) select.value = defaultTopicId;
+function renderPracticas() {
+  initPracticasDropzone();
+  renderPracticasFilesList();
+}
 
-  if (practiceId) {
-    const p = appDB.practices.find(x => x.id === practiceId);
-    if (!p) return;
-    title.textContent = "Editar Práctica de Laboratorio";
-    document.getElementById("practiceFormId").value = p.id;
-    document.getElementById("practiceFormTitle").value = p.title || "";
-    document.getElementById("practiceFormDate").value = p.date || "";
-    document.getElementById("practiceFormStatement").value = p.statement || "";
-    document.getElementById("practiceFormObjectives").value = p.objectives || "";
-    document.getElementById("practiceFormMaterials").value = p.materials || "";
-    document.getElementById("practiceFormData").value = p.data || "";
-    document.getElementById("practiceFormProcedure").value = p.procedure || "";
-    document.getElementById("practiceFormCalculations").value = p.calculations || "";
-    document.getElementById("practiceFormResults").value = p.results || "";
-    document.getElementById("practiceFormConclusions").value = p.conclusions || "";
-    if (select) select.value = p.topicId || "";
-    pendingPracticeFiles = [...(p.files || [])];
-  } else {
-    title.textContent = "Registrar Nueva Práctica de Laboratorio";
-    document.getElementById("practiceFormId").value = "";
-    document.getElementById("practiceFormDate").value = new Date().toISOString().slice(0, 10);
+function initPracticasDropzone() {
+  const dropzone = document.getElementById("practiceDropzone");
+  if (!dropzone || dropzone._hasListeners) return;
+  dropzone._hasListeners = true;
+
+  ["dragenter", "dragover"].forEach(name => {
+    dropzone.addEventListener(name, (e) => {
+      e.preventDefault();
+      dropzone.classList.add("drag-active");
+    });
+  });
+
+  ["dragleave", "drop"].forEach(name => {
+    dropzone.addEventListener(name, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove("drag-active");
+    });
+  });
+
+  dropzone.addEventListener("drop", (e) => {
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      handlePracticesBatchUpload(files);
+    }
+  });
+
+  // Inputs de carga
+  const headerInput = document.getElementById("practiceHeaderFileInput");
+  const imagesInput = document.getElementById("practiceImagesBtnInput");
+  const pdfsInput = document.getElementById("practicePdfsBtnInput");
+  const anyInput = document.getElementById("practiceAnyBtnInput");
+
+  [headerInput, imagesInput, pdfsInput, anyInput].forEach(inp => {
+    if (inp) {
+      inp.onchange = (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+          handlePracticesBatchUpload(e.target.files);
+          inp.value = "";
+        }
+      };
+    }
+  });
+}
+
+function handlePracticesBatchUpload(fileList) {
+  Array.from(fileList).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target.result;
+      const fileId = generateUniqueId("prac_file");
+
+      // Guardar en IndexedDB
+      await FileStorage.saveFile(fileId, file.name, file.type, file.size, dataUrl);
+
+      if (!Array.isArray(appDB.practiceFiles)) appDB.practiceFiles = [];
+
+      appDB.practiceFiles.unshift({
+        id: fileId,
+        name: file.name,
+        type: file.type || (file.name.endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
+        size: file.size,
+        uploadDate: new Date().toISOString().slice(0, 10),
+        data: dataUrl
+      });
+
+      scheduleAutoSave(0);
+      renderPracticasFilesList();
+      updateNavBadges();
+      showToast(`✓ Archivo "${file.name}" subido y guardado.`, "success");
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderPracticasFilesList() {
+  const grid = document.getElementById("practiceFilesGrid");
+  const empty = document.getElementById("practiceFilesEmptyState");
+  const badge = document.getElementById("practiceFilesTotalBadge");
+  if (!grid) return;
+
+  const files = appDB.practiceFiles || [];
+  if (badge) badge.textContent = files.length;
+
+  let filtered = files;
+  if (filters.practicesSearch && filters.practicesSearch.trim()) {
+    const q = filters.practicesSearch.toLowerCase().trim();
+    filtered = files.filter(f => f.name.toLowerCase().includes(q));
   }
 
-  renderPendingFilesList("practiceFormFilesPreview", pendingPracticeFiles, "practice");
-  openModal("practiceModal");
+  if (filtered.length === 0) {
+    grid.innerHTML = "";
+    if (empty) empty.classList.remove("hidden");
+    return;
+  }
+
+  if (empty) empty.classList.add("hidden");
+
+  grid.innerHTML = filtered.map(f => {
+    const isPdf = f.type === "application/pdf" || (f.name && f.name.toLowerCase().endsWith(".pdf"));
+    const isImage = !isPdf;
+
+    return `
+      <div class="practice-file-card" id="pfile-el-${escapeHTML(f.id)}">
+        <div class="practice-file-thumb" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${f.data}')">
+          <span class="file-type-pill ${isPdf ? 'pdf' : ''}">${isPdf ? 'PDF' : 'IMAGEN'}</span>
+          ${isImage ? `
+            <img src="${f.data || 'assets/imagenes/laboratorio_fotopuertas.svg'}" alt="${escapeHTML(f.name)}" loading="lazy">
+          ` : `
+            <div class="pdf-icon-display">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+              <span style="font-weight: 700; font-size: 13px;">Documento PDF</span>
+            </div>
+          `}
+        </div>
+
+        <div class="practice-file-body">
+          <h4 class="practice-file-name" title="${escapeHTML(f.name)}">${escapeHTML(f.name)}</h4>
+          <span class="practice-file-meta">${formatBytes(f.size)} · ${escapeHTML(f.uploadDate || '2026-10-12')}</span>
+
+          <div class="practice-file-actions">
+            <button class="btn btn-primary btn-sm" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${f.data}')">
+              👁 Abrir
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="downloadFileDirectly('${escapeHTML(f.name)}', '${f.data}')">
+              ⬇ Descargar
+            </button>
+            <label class="btn btn-outline btn-sm file-input-label" title="Reemplazar archivo">
+              🔄 Reemplazar
+              <input type="file" accept=".pdf, image/*" onchange="replacePracticeFile('${escapeHTML(f.id)}', this.files[0])">
+            </label>
+            <button class="icon-action-btn delete" title="Eliminar archivo" onclick="confirmDelete('practiceFile', '${escapeHTML(f.id)}')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
-// --- E. MODAL TALLER ---
-let pendingWorkshopFiles = [];
+function replacePracticeFile(fileId, newFile) {
+  if (!newFile) return;
+  const fileRecord = appDB.practiceFiles.find(f => f.id === fileId);
+  if (!fileRecord) return;
 
-function openWorkshopModal(workshopId = null, defaultTopicId = null) {
-  const title = document.getElementById("workshopModalTitle");
-  const form = document.getElementById("workshopForm");
-  form.reset();
-  pendingWorkshopFiles = [];
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const dataUrl = e.target.result;
+    await FileStorage.saveFile(fileId, newFile.name, newFile.type, newFile.size, dataUrl);
 
-  populateTopicSelects();
-  const select = document.getElementById("workshopFormTopicSelect");
-  if (defaultTopicId && select) select.value = defaultTopicId;
+    fileRecord.name = newFile.name;
+    fileRecord.type = newFile.type;
+    fileRecord.size = newFile.size;
+    fileRecord.data = dataUrl;
+    fileRecord.uploadDate = new Date().toISOString().slice(0, 10);
+
+    scheduleAutoSave(0);
+    renderPracticasFilesList();
+    showToast(`✓ Archivo reemplazado por "${newFile.name}".`, "success");
+  };
+  reader.readAsDataURL(newFile);
+}
+
+function downloadFileDirectly(filename, dataUrl) {
+  if (!dataUrl) {
+    showToast("Archivo no disponible para descarga local directa.", "info");
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename || "archivo_practica";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// ============================================================================
+// VISTA 4: TALLERES (APARTADO INDEPENDIENTE)
+// ============================================================================
+
+function renderTalleres() {
+  const grid = document.getElementById("workshopsGrid");
+  const empty = document.getElementById("workshopsEmptyState");
+  if (!grid) return;
+
+  let filtered = appDB.workshops.filter(w => {
+    const matchSearch = !filters.workshopsSearch ||
+      w.title.toLowerCase().includes(filters.workshopsSearch.toLowerCase()) ||
+      (w.statement && w.statement.toLowerCase().includes(filters.workshopsSearch.toLowerCase())) ||
+      (w.finalAnswer && w.finalAnswer.toLowerCase().includes(filters.workshopsSearch.toLowerCase()));
+    const matchTopic = filters.workshopsTopic === "all" || w.topicId === filters.workshopsTopic;
+    return matchSearch && matchTopic;
+  });
+
+  if (filtered.length === 0) {
+    grid.innerHTML = "";
+    if (empty) empty.classList.remove("hidden");
+  } else {
+    if (empty) empty.classList.add("hidden");
+    grid.innerHTML = filtered.map(w => `
+      <div class="activity-card" id="workshop-el-${escapeHTML(w.id)}">
+        <div class="activity-card-top">
+          <span class="activity-type-badge taller">📝 Taller</span>
+          <span class="activity-date">${escapeHTML(w.date || '2026-10-12')}</span>
+        </div>
+        <div class="activity-card-topic">${escapeHTML(getTopicTitleById(w.topicId))}</div>
+        <h3 class="activity-card-title">${escapeHTML(w.title)}</h3>
+        <p class="activity-card-snippet">${escapeHTML(w.statement || "")}</p>
+        ${w.finalAnswer ? `
+          <div class="activity-card-highlight">
+            <strong>Respuesta:</strong> ${escapeHTML(w.finalAnswer)}
+          </div>
+        ` : ''}
+        <div class="activity-card-footer">
+          <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('workshop', '${escapeHTML(w.id)}')">
+            Ver desarrollo
+          </button>
+          <div class="activity-card-actions">
+            <button class="icon-action-btn" title="Editar taller" onclick="openWorkshopModal('${escapeHTML(w.id)}')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+            </button>
+            <button class="icon-action-btn delete" title="Eliminar taller" onclick="confirmDelete('workshop', '${escapeHTML(w.id)}')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  }
+}
+
+let activeEditingWorkshop = null;
+
+function openWorkshopModal(workshopId = null) {
+  let item = null;
+  let isNew = false;
 
   if (workshopId) {
-    const w = appDB.workshops.find(x => x.id === workshopId);
-    if (!w) return;
-    title.textContent = "Editar Taller / Ejercicio";
-    document.getElementById("workshopFormId").value = w.id;
-    document.getElementById("workshopFormTitle").value = w.title || "";
-    document.getElementById("workshopFormDate").value = w.date || "";
-    document.getElementById("workshopFormStatement").value = w.statement || "";
-    document.getElementById("workshopFormFormulas").value = w.formulas || "";
-    document.getElementById("workshopFormStepByStep").value = w.stepByStep || "";
-    document.getElementById("workshopFormAnswer").value = w.finalAnswer || "";
-    document.getElementById("workshopFormVerification").value = w.verification || "";
-    document.getElementById("workshopFormReflection").value = w.reflection || "";
-    if (select) select.value = w.topicId || "";
-    pendingWorkshopFiles = [...(w.files || [])];
-  } else {
-    title.textContent = "Registrar Nuevo Taller";
-    document.getElementById("workshopFormId").value = "";
-    document.getElementById("workshopFormDate").value = new Date().toISOString().slice(0, 10);
+    item = appDB.workshops.find(w => w.id === workshopId);
   }
 
-  renderPendingFilesList("workshopFormFilesPreview", pendingWorkshopFiles, "workshop");
+  if (!item) {
+    isNew = true;
+    item = {
+      id: generateUniqueId("tall"),
+      topicId: "",
+      title: "",
+      date: new Date().toISOString().slice(0, 10),
+      statement: "",
+      formulas: "",
+      stepByStep: "",
+      finalAnswer: "",
+      verification: "",
+      reflection: "",
+      files: []
+    };
+    appDB.workshops.unshift(item);
+    scheduleAutoSave(0);
+  }
+
+  activeEditingWorkshop = item;
+
+  document.getElementById("workshopModalTitle").textContent = isNew ? "Registrar Nuevo Taller" : "Editar Taller";
+  document.getElementById("workshopFormId").value = item.id;
+  document.getElementById("workshopFormTitle").value = item.title || "";
+  document.getElementById("workshopFormDate").value = item.date || "";
+  document.getElementById("workshopFormTopicSelect").value = item.topicId || "";
+  document.getElementById("workshopFormStatement").value = item.statement || "";
+  document.getElementById("workshopFormFormulas").value = item.formulas || "";
+  document.getElementById("workshopFormStepByStep").value = item.stepByStep || "";
+  document.getElementById("workshopFormAnswer").value = item.finalAnswer || "";
+  document.getElementById("workshopFormVerification").value = item.verification || "";
+  document.getElementById("workshopFormReflection").value = item.reflection || "";
+
+  // Enlazar guardado automático en tiempo real en cada campo
+  const fields = [
+    { id: "workshopFormTitle", prop: "title" },
+    { id: "workshopFormDate", prop: "date" },
+    { id: "workshopFormTopicSelect", prop: "topicId" },
+    { id: "workshopFormStatement", prop: "statement" },
+    { id: "workshopFormFormulas", prop: "formulas" },
+    { id: "workshopFormStepByStep", prop: "stepByStep" },
+    { id: "workshopFormAnswer", prop: "finalAnswer" },
+    { id: "workshopFormVerification", prop: "verification" },
+    { id: "workshopFormReflection", prop: "reflection" }
+  ];
+
+  fields.forEach(f => {
+    const el = document.getElementById(f.id);
+    if (el) {
+      el.oninput = () => {
+        item[f.prop] = el.value;
+        scheduleAutoSave();
+      };
+      el.onchange = () => {
+        item[f.prop] = el.value;
+        scheduleAutoSave();
+      };
+    }
+  });
+
+  const form = document.getElementById("workshopForm");
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    flushAutoSave();
+    closeModal("workshopModal");
+    renderTalleres();
+    updateNavBadges();
+    showToast("✓ Taller guardado correctamente.", "success");
+  };
+
   openModal("workshopModal");
 }
 
-// --- F. MODAL PARCIAL ---
-let pendingExamFiles = [];
+// ============================================================================
+// VISTA 5: PARCIALES Y CORRECCIONES (APARTADO INDEPENDIENTE)
+// ============================================================================
 
-function openExamModal(examId = null, defaultTopicId = null) {
-  const title = document.getElementById("examModalTitle");
-  const form = document.getElementById("examForm");
-  form.reset();
-  pendingExamFiles = [];
+function renderParciales() {
+  const grid = document.getElementById("examsGrid");
+  const empty = document.getElementById("examsEmptyState");
+  if (!grid) return;
 
-  populateTopicSelects();
-  const select = document.getElementById("examFormTopicSelect");
-  if (defaultTopicId && select) select.value = defaultTopicId;
+  let filtered = appDB.exams.filter(e => {
+    const matchSearch = !filters.examsSearch ||
+      e.title.toLowerCase().includes(filters.examsSearch.toLowerCase()) ||
+      (e.statement && e.statement.toLowerCase().includes(filters.examsSearch.toLowerCase())) ||
+      (e.identifiedError && e.identifiedError.toLowerCase().includes(filters.examsSearch.toLowerCase()));
+    const matchTopic = filters.examsTopic === "all" || e.topicId === filters.examsTopic;
+    return matchSearch && matchTopic;
+  });
+
+  if (filtered.length === 0) {
+    grid.innerHTML = "";
+    if (empty) empty.classList.remove("hidden");
+  } else {
+    if (empty) empty.classList.add("hidden");
+    grid.innerHTML = filtered.map(e => `
+      <div class="activity-card" id="exam-el-${escapeHTML(e.id)}">
+        <div class="activity-card-top">
+          <span class="activity-type-badge parcial">🎯 Parcial</span>
+          <span class="activity-date">${escapeHTML(e.date || '2026-10-12')}</span>
+        </div>
+        <div class="activity-card-topic">${escapeHTML(getTopicTitleById(e.topicId))}</div>
+        <h3 class="activity-card-title">${escapeHTML(e.title)}</h3>
+        <p class="activity-card-snippet">${escapeHTML(e.statement || "")}</p>
+        ${e.identifiedError ? `
+          <div class="activity-card-warning">
+            <strong>⚠ Error diagnosticado:</strong> ${escapeHTML(e.identifiedError)}
+          </div>
+        ` : ''}
+        <div class="activity-card-footer">
+          <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('exam', '${escapeHTML(e.id)}')">
+            Ver corrección
+          </button>
+          <div class="activity-card-actions">
+            <button class="icon-action-btn" title="Editar parcial" onclick="openExamModal('${escapeHTML(e.id)}')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+            </button>
+            <button class="icon-action-btn delete" title="Eliminar parcial" onclick="confirmDelete('exam', '${escapeHTML(e.id)}')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  }
+}
+
+let activeEditingExam = null;
+
+function openExamModal(examId = null) {
+  let item = null;
+  let isNew = false;
 
   if (examId) {
-    const e = appDB.exams.find(x => x.id === examId);
-    if (!e) return;
-    title.textContent = "Editar Corrección de Parcial";
-    document.getElementById("examFormId").value = e.id;
-    document.getElementById("examFormTitle").value = e.title || "";
-    document.getElementById("examFormDate").value = e.date || "";
-    document.getElementById("examFormContents").value = e.evaluatedContents || "";
-    document.getElementById("examFormStatement").value = e.statement || "";
-    document.getElementById("examFormOriginal").value = e.originalProcedure || "";
-    document.getElementById("examFormError").value = e.identifiedError || "";
-    document.getElementById("examFormCorrectSolution").value = e.correctSolution || "";
-    document.getElementById("examFormVerification").value = e.verification || "";
-    document.getElementById("examFormReflection").value = e.preventionReflection || "";
-    if (select) select.value = e.topicId || "";
-    pendingExamFiles = [...(e.files || [])];
-  } else {
-    title.textContent = "Registrar Corrección de Parcial";
-    document.getElementById("examFormId").value = "";
-    document.getElementById("examFormDate").value = new Date().toISOString().slice(0, 10);
+    item = appDB.exams.find(e => e.id === examId);
   }
 
-  renderPendingFilesList("examFormFilesPreview", pendingExamFiles, "exam");
+  if (!item) {
+    isNew = true;
+    item = {
+      id: generateUniqueId("parc"),
+      topicId: "",
+      title: "",
+      date: new Date().toISOString().slice(0, 10),
+      evaluatedContents: "",
+      statement: "",
+      originalProcedure: "",
+      identifiedError: "",
+      correctSolution: "",
+      verification: "",
+      preventionReflection: "",
+      files: []
+    };
+    appDB.exams.unshift(item);
+    scheduleAutoSave(0);
+  }
+
+  activeEditingExam = item;
+
+  document.getElementById("examModalTitle").textContent = isNew ? "Registrar Nuevo Parcial" : "Editar Corrección de Parcial";
+  document.getElementById("examFormId").value = item.id;
+  document.getElementById("examFormTitle").value = item.title || "";
+  document.getElementById("examFormDate").value = item.date || "";
+  document.getElementById("examFormTopicSelect").value = item.topicId || "";
+  document.getElementById("examFormContents").value = item.evaluatedContents || "";
+  document.getElementById("examFormStatement").value = item.statement || "";
+  document.getElementById("examFormOriginal").value = item.originalProcedure || "";
+  document.getElementById("examFormError").value = item.identifiedError || "";
+  document.getElementById("examFormCorrectSolution").value = item.correctSolution || "";
+  document.getElementById("examFormVerification").value = item.verification || "";
+  document.getElementById("examFormReflection").value = item.preventionReflection || "";
+
+  // Guardado en tiempo real en cada campo
+  const fields = [
+    { id: "examFormTitle", prop: "title" },
+    { id: "examFormDate", prop: "date" },
+    { id: "examFormTopicSelect", prop: "topicId" },
+    { id: "examFormContents", prop: "evaluatedContents" },
+    { id: "examFormStatement", prop: "statement" },
+    { id: "examFormOriginal", prop: "originalProcedure" },
+    { id: "examFormError", prop: "identifiedError" },
+    { id: "examFormCorrectSolution", prop: "correctSolution" },
+    { id: "examFormVerification", prop: "verification" },
+    { id: "examFormReflection", prop: "preventionReflection" }
+  ];
+
+  fields.forEach(f => {
+    const el = document.getElementById(f.id);
+    if (el) {
+      el.oninput = () => {
+        item[f.prop] = el.value;
+        scheduleAutoSave();
+      };
+      el.onchange = () => {
+        item[f.prop] = el.value;
+        scheduleAutoSave();
+      };
+    }
+  });
+
+  const form = document.getElementById("examForm");
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    flushAutoSave();
+    closeModal("examModal");
+    renderParciales();
+    updateNavBadges();
+    showToast("✓ Parcial guardado correctamente.", "success");
+  };
+
   openModal("examModal");
 }
 
-// --- G. MODAL METACOGNICIÓN ---
-let pendingLearningFiles = [];
+// ============================================================================
+// VISTA 6: MI APRENDIZAJE Y METACOGNICIÓN
+// ============================================================================
 
-function openLearningModal(learnId = null, defaultTopicId = null) {
-  const title = document.getElementById("learningModalTitle");
-  const form = document.getElementById("learningForm");
-  form.reset();
-  pendingLearningFiles = [];
+function renderAprendizaje() {
+  const grid = document.getElementById("learningsGrid");
+  const empty = document.getElementById("learningsEmptyState");
+  if (!grid) return;
 
-  populateTopicSelects();
-  const select = document.getElementById("learningFormTopicSelect");
-  if (defaultTopicId && select) select.value = defaultTopicId;
+  let filtered = appDB.learnings.filter(l => {
+    const matchSearch = !filters.learningsSearch ||
+      l.title.toLowerCase().includes(filters.learningsSearch.toLowerCase()) ||
+      (l.difficulty && l.difficulty.toLowerCase().includes(filters.learningsSearch.toLowerCase())) ||
+      (l.whatILearned && l.whatILearned.toLowerCase().includes(filters.learningsSearch.toLowerCase()));
+    const matchTopic = filters.learningsTopic === "all" || l.topicId === filters.learningsTopic;
+    return matchSearch && matchTopic;
+  });
+
+  if (filtered.length === 0) {
+    grid.innerHTML = "";
+    if (empty) empty.classList.remove("hidden");
+  } else {
+    if (empty) empty.classList.add("hidden");
+    grid.innerHTML = filtered.map(l => `
+      <div class="activity-card" id="learning-el-${escapeHTML(l.id)}">
+        <div class="activity-card-top">
+          <span class="activity-type-badge aprendizaje">✦ Metacognición</span>
+        </div>
+        <div class="activity-card-topic">${escapeHTML(getTopicTitleById(l.topicId))}</div>
+        <h3 class="activity-card-title">${escapeHTML(l.title)}</h3>
+        <p class="activity-card-snippet"><strong>1. Dificultad:</strong> ${escapeHTML(l.difficulty || "")}</p>
+        <div class="activity-card-footer">
+          <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('learning', '${escapeHTML(l.id)}')">
+            Ver reflexión completa
+          </button>
+          <div class="activity-card-actions">
+            <button class="icon-action-btn" title="Editar reflexión" onclick="openLearningModal('${escapeHTML(l.id)}')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+            </button>
+            <button class="icon-action-btn delete" title="Eliminar reflexión" onclick="confirmDelete('learning', '${escapeHTML(l.id)}')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  }
+}
+
+function openLearningModal(learnId = null) {
+  let item = null;
+  let isNew = false;
 
   if (learnId) {
-    const l = appDB.learnings.find(x => x.id === learnId);
-    if (!l) return;
-    title.textContent = "Editar Situación de Aprendizaje";
-    document.getElementById("learningFormId").value = l.id;
-    document.getElementById("learningFormTitle").value = l.title || "";
-    document.getElementById("learningFormDifficulty").value = l.difficulty || "";
-    document.getElementById("learningFormConcept").value = l.uncomprehendedConcept || "";
-    document.getElementById("learningFormStrategy").value = l.strategyUsed || "";
-    document.getElementById("learningFormResources").value = l.helpfulResources || "";
-    document.getElementById("learningFormWhatLearned").value = l.whatILearned || "";
-    document.getElementById("learningFormVerification").value = l.howIVerified || "";
-    document.getElementById("learningFormReflection").value = l.personalReflection || "";
-    if (select) select.value = l.topicId || "";
-    pendingLearningFiles = [...(l.files || [])];
-  } else {
-    title.textContent = "Registrar Nueva Situación de Aprendizaje";
-    document.getElementById("learningFormId").value = "";
+    item = appDB.learnings.find(l => l.id === learnId);
   }
 
-  renderPendingFilesList("learningFormFilesPreview", pendingLearningFiles, "learning");
+  if (!item) {
+    isNew = true;
+    item = {
+      id: generateUniqueId("learn"),
+      topicId: "",
+      title: "",
+      difficulty: "",
+      uncomprehendedConcept: "",
+      strategyUsed: "",
+      helpfulResources: "",
+      whatILearned: "",
+      howIVerified: "",
+      personalReflection: "",
+      files: []
+    };
+    appDB.learnings.unshift(item);
+    scheduleAutoSave(0);
+  }
+
+  document.getElementById("learningModalTitle").textContent = isNew ? "Registrar Nueva Situación" : "Editar Situación de Aprendizaje";
+  document.getElementById("learningFormId").value = item.id;
+  document.getElementById("learningFormTitle").value = item.title || "";
+  document.getElementById("learningFormTopicSelect").value = item.topicId || "";
+  document.getElementById("learningFormDifficulty").value = item.difficulty || "";
+  document.getElementById("learningFormConcept").value = item.uncomprehendedConcept || "";
+  document.getElementById("learningFormStrategy").value = item.strategyUsed || "";
+  document.getElementById("learningFormResources").value = item.helpfulResources || "";
+  document.getElementById("learningFormWhatILearned").value = item.whatILearned || "";
+  document.getElementById("learningFormHowIVerified").value = item.howIVerified || "";
+  document.getElementById("learningFormReflection").value = item.personalReflection || "";
+
+  // Guardado en tiempo real
+  const fields = [
+    { id: "learningFormTitle", prop: "title" },
+    { id: "learningFormTopicSelect", prop: "topicId" },
+    { id: "learningFormDifficulty", prop: "difficulty" },
+    { id: "learningFormConcept", prop: "uncomprehendedConcept" },
+    { id: "learningFormStrategy", prop: "strategyUsed" },
+    { id: "learningFormResources", prop: "helpfulResources" },
+    { id: "learningFormWhatILearned", prop: "whatILearned" },
+    { id: "learningFormHowIVerified", prop: "howIVerified" },
+    { id: "learningFormReflection", prop: "personalReflection" }
+  ];
+
+  fields.forEach(f => {
+    const el = document.getElementById(f.id);
+    if (el) {
+      el.oninput = () => {
+        item[f.prop] = el.value;
+        scheduleAutoSave();
+      };
+    }
+  });
+
+  const form = document.getElementById("learningForm");
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    flushAutoSave();
+    closeModal("learningModal");
+    renderAprendizaje();
+    updateNavBadges();
+    showToast("✓ Situación guardada correctamente.", "success");
+  };
+
   openModal("learningModal");
 }
 
-// --- AUXILIARES DE SUBIDA DE ARCHIVOS ---
-function renderPendingFilesList(containerId, fileArray, type) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  container.innerHTML = fileArray.map((f, idx) => `
-    <div class="attached-item-chip">
-      <span>📎</span>
-      <span class="attached-item-name">${escapeHTML(f.name)}</span>
-      <button type="button" class="attached-item-remove-btn" onclick="removePendingFile('${type}', ${idx})">✕</button>
-    </div>
-  `).join("");
-}
+// ============================================================================
+// MODAL DE GESTIÓN GENERAL DE TEMAS (CREAR / EDITAR TEMA)
+// ============================================================================
 
-function removePendingFile(type, index) {
-  if (type === "practice") {
-    pendingPracticeFiles.splice(index, 1);
-    renderPendingFilesList("practiceFormFilesPreview", pendingPracticeFiles, "practice");
-  } else if (type === "workshop") {
-    pendingWorkshopFiles.splice(index, 1);
-    renderPendingFilesList("workshopFormFilesPreview", pendingWorkshopFiles, "workshop");
-  } else if (type === "exam") {
-    pendingExamFiles.splice(index, 1);
-    renderPendingFilesList("examFormFilesPreview", pendingExamFiles, "exam");
-  } else if (type === "learning") {
-    pendingLearningFiles.splice(index, 1);
-    renderPendingFilesList("learningFormFilesPreview", pendingLearningFiles, "learning");
+function openTopicModal(topicId = null) {
+  let topic = null;
+  let isNew = false;
+
+  if (topicId) {
+    topic = appDB.topics.find(t => t.id === topicId);
   }
-}
 
-function readFilesSafely(fileList, maxSizeBytes = 1.5 * 1024 * 1024) {
-  return Promise.all(
-    fileList.map(file => {
-      return new Promise((resolve) => {
-        if (file.size > maxSizeBytes) {
-          showToast(`El archivo "${file.name}" supera el tamaño sugerido de 1.5 MB para LocalStorage.`, "warning");
-        }
-        const reader = new FileReader();
-        reader.onload = () => {
-          resolve({
-            name: file.name,
-            type: file.type,
-            size: file.size,
-            data: reader.result
-          });
-        };
-        reader.onerror = () => {
-          showToast(`No se pudo leer el archivo "${file.name}".`, "error");
-          resolve(null);
-        };
-        reader.readAsDataURL(file);
-      });
-    })
-  ).then(results => results.filter(Boolean));
+  if (!topic) {
+    isNew = true;
+    topic = {
+      id: generateUniqueId("tema"),
+      order: appDB.topics.length + 1,
+      title: "",
+      description: "",
+      status: "Pendiente",
+      estimatedHours: "20 horas",
+      definitions: [],
+      formulas: [],
+      metacognition: [],
+      evidencias: []
+    };
+    appDB.topics.push(topic);
+    scheduleAutoSave(0);
+  }
+
+  document.getElementById("topicModalTitle").textContent = isNew ? "Crear Nuevo Tema" : "Editar Información del Tema";
+  document.getElementById("topicFormId").value = topic.id;
+  document.getElementById("topicFormTitle").value = topic.title || "";
+  document.getElementById("topicFormOrder").value = topic.order || 1;
+  document.getElementById("topicFormStatus").value = topic.status || "Pendiente";
+  document.getElementById("topicFormHours").value = topic.estimatedHours || "";
+  document.getElementById("topicFormDesc").value = topic.description || "";
+
+  // Guardado en tiempo real
+  const fields = [
+    { id: "topicFormTitle", prop: "title" },
+    { id: "topicFormOrder", prop: "order" },
+    { id: "topicFormStatus", prop: "status" },
+    { id: "topicFormHours", prop: "estimatedHours" },
+    { id: "topicFormDesc", prop: "description" }
+  ];
+
+  fields.forEach(f => {
+    const el = document.getElementById(f.id);
+    if (el) {
+      el.oninput = () => {
+        topic[f.prop] = el.value;
+        scheduleAutoSave();
+      };
+      el.onchange = () => {
+        topic[f.prop] = el.value;
+        scheduleAutoSave();
+      };
+    }
+  });
+
+  const form = document.getElementById("topicForm");
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    flushAutoSave();
+    closeModal("topicModal");
+    renderTemas();
+    populateTopicSelects();
+    updateNavBadges();
+    showToast("✓ Tema guardado correctamente.", "success");
+  };
+
+  openModal("topicModal");
 }
 
 // ============================================================================
-// 9. VISOR DETALLADO DE ELEMENTOS (ITEM VIEWER MODAL)
+// VISOR DETALLADO DE ELEMENTOS (ItemViewerModal)
 // ============================================================================
 
 function openItemViewerModal(type, itemId) {
-  const modal = document.getElementById("itemViewerModal");
-  const title = document.getElementById("itemViewerTitle");
-  const badge = document.getElementById("itemViewerBadge");
-  const body = document.getElementById("itemViewerBody");
-  if (!modal || !body) return;
-
+  let title = "Detalle";
   let contentHTML = "";
 
-  if (type === "practice") {
-    const p = appDB.practices.find(x => x.id === itemId);
-    if (!p) return;
-    badge.textContent = "🧪";
-    title.textContent = p.title;
-    contentHTML = `
-      <div class="activity-card-top" style="margin-bottom: 16px;">
-        <span class="topic-tag">${escapeHTML(getTopicTitleById(p.topicId))}</span>
-        <span class="activity-date">Fecha: ${p.date || "No registrada"}</span>
-      </div>
-      ${p.statement ? `<div class="detail-field-group"><strong>Enunciado:</strong><p>${escapeHTML(p.statement)}</p></div>` : ''}
-      ${p.objectives ? `<div class="detail-field-group"><strong>Objetivos:</strong><p>${escapeHTML(p.objectives)}</p></div>` : ''}
-      ${p.materials ? `<div class="detail-field-group"><strong>Materiales y Equipos:</strong><p>${escapeHTML(p.materials)}</p></div>` : ''}
-      ${p.data ? `<div class="detail-field-group"><strong>Datos Experimentales:</strong><p>${escapeHTML(p.data)}</p></div>` : ''}
-      ${p.procedure ? `<div class="detail-field-group"><strong>Procedimiento:</strong><p>${escapeHTML(p.procedure)}</p></div>` : ''}
-      ${p.calculations ? `<div class="detail-field-group"><strong>Cálculos y Fórmulas:</strong><p>${escapeHTML(p.calculations)}</p></div>` : ''}
-      ${p.results ? `<div class="detail-field-group"><strong>Resultados:</strong><div class="highlight-box">${escapeHTML(p.results)}</div></div>` : ''}
-      ${p.conclusions ? `<div class="detail-field-group"><strong>Conclusiones:</strong><p>${escapeHTML(p.conclusions)}</p></div>` : ''}
-      ${(p.files && p.files.length) ? `
-        <div class="detail-field-group">
-          <strong>Archivos Adjuntos:</strong>
-          <div class="evidence-gallery" style="margin-top: 10px;">
-            ${p.files.map(f => `
-              <div class="evidence-thumbnail-card" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${f.data}')">
-                <div class="evidence-thumb-img-wrap">
-                  ${f.type && f.type.startsWith("image/") ? `<img src="${f.data}" alt="Foto">` : '<span class="doc-icon">📄</span>'}
-                </div>
-                <div class="evidence-thumb-info">
-                  <span class="evidence-thumb-name">${escapeHTML(f.name)}</span>
-                  <span class="evidence-thumb-meta">Práctica</span>
-                </div>
-              </div>
-            `).join("")}
-          </div>
-        </div>
-      ` : ''}
-    `;
-  } else if (type === "workshop") {
+  if (type === "workshop") {
     const w = appDB.workshops.find(x => x.id === itemId);
     if (!w) return;
-    badge.textContent = "📝";
-    title.textContent = w.title;
+    title = w.title;
     contentHTML = `
-      <div class="activity-card-top" style="margin-bottom: 16px;">
-        <span class="topic-tag">${escapeHTML(getTopicTitleById(w.topicId))}</span>
-        <span class="activity-date">Fecha: ${w.date || "No registrada"}</span>
+      <div class="viewer-section">
+        <span class="viewer-tag">TEMA: ${escapeHTML(getTopicTitleById(w.topicId))} · FECHA: ${escapeHTML(w.date || '')}</span>
+        <h3 class="viewer-title">${escapeHTML(w.title)}</h3>
       </div>
-      <div class="detail-field-group"><strong>Enunciado:</strong><p>${escapeHTML(w.statement)}</p></div>
+      <div class="viewer-block">
+        <h4>Enunciado del Problema:</h4>
+        <p>${escapeHTML(w.statement)}</p>
+      </div>
       ${w.formulas ? `
-        <div class="detail-field-group">
-          <strong>Fórmulas Utilizadas:</strong>
-          <div class="formula-display-box">${formatLatex(w.formulas, true)}</div>
+        <div class="viewer-block">
+          <h4>Fórmulas Empleadas:</h4>
+          <div class="katex-rendered-box">${formatLatex(w.formulas, true)}</div>
         </div>
       ` : ''}
-      ${w.stepByStep ? `<div class="detail-field-group"><strong>Procedimiento Paso a Paso:</strong><p>${escapeHTML(w.stepByStep)}</p></div>` : ''}
-      ${w.finalAnswer ? `<div class="detail-field-group"><strong>Respuesta Final:</strong><div class="success-box"><strong>${escapeHTML(w.finalAnswer)}</strong></div></div>` : ''}
-      ${w.verification ? `<div class="detail-field-group"><strong>Verificación Física:</strong><p>${escapeHTML(w.verification)}</p></div>` : ''}
-      ${w.reflection ? `<div class="detail-field-group"><strong>Reflexión:</strong><p>${escapeHTML(w.reflection)}</p></div>` : ''}
-      ${(w.files && w.files.length) ? `
-        <div class="detail-field-group">
-          <strong>Hojas de Trabajo Adjuntas:</strong>
-          <div class="evidence-gallery" style="margin-top: 10px;">
-            ${w.files.map(f => `
-              <div class="evidence-thumbnail-card" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${f.data}')">
-                <div class="evidence-thumb-img-wrap">
-                  ${f.type && f.type.startsWith("image/") ? `<img src="${f.data}" alt="Foto">` : '<span class="doc-icon">📄</span>'}
-                </div>
-                <div class="evidence-thumb-info">
-                  <span class="evidence-thumb-name">${escapeHTML(f.name)}</span>
-                  <span class="evidence-thumb-meta">Taller</span>
-                </div>
-              </div>
-            `).join("")}
-          </div>
+      <div class="viewer-block">
+        <h4>Procedimiento y Desarrollo Paso a Paso:</h4>
+        <pre class="viewer-pre">${escapeHTML(w.stepByStep)}</pre>
+      </div>
+      <div class="viewer-block highlight">
+        <h4>Respuesta Final:</h4>
+        <p><strong>${escapeHTML(w.finalAnswer)}</strong></p>
+      </div>
+      ${w.verification ? `
+        <div class="viewer-block">
+          <h4>Verificación:</h4>
+          <p>${escapeHTML(w.verification)}</p>
+        </div>
+      ` : ''}
+      ${w.reflection ? `
+        <div class="viewer-block">
+          <h4>Reflexión:</h4>
+          <p>${escapeHTML(w.reflection)}</p>
         </div>
       ` : ''}
     `;
   } else if (type === "exam") {
     const e = appDB.exams.find(x => x.id === itemId);
     if (!e) return;
-    badge.textContent = "🎯";
-    title.textContent = e.title;
+    title = e.title;
     contentHTML = `
-      <div class="activity-card-top" style="margin-bottom: 16px;">
-        <span class="topic-tag">${escapeHTML(getTopicTitleById(e.topicId))}</span>
-        <span class="activity-date">Fecha: ${e.date || "No registrada"}</span>
+      <div class="viewer-section">
+        <span class="viewer-tag">EVALUACIÓN · ${escapeHTML(getTopicTitleById(e.topicId))}</span>
+        <h3 class="viewer-title">${escapeHTML(e.title)}</h3>
       </div>
-      ${e.evaluatedContents ? `<div class="detail-field-group"><strong>Contenidos Evaluados:</strong><p>${escapeHTML(e.evaluatedContents)}</p></div>` : ''}
-      <div class="detail-field-group"><strong>1. Enunciado del Problema:</strong><p>${escapeHTML(e.statement)}</p></div>
-      <div class="detail-field-group"><strong>2. Procedimiento Original Realizado:</strong><p>${escapeHTML(e.originalProcedure)}</p></div>
-      <div class="detail-field-group">
-        <strong>3. Error Identificado (Diagnóstico Pedagógico):</strong>
-        <div class="error-diagnosis-box"><strong>⚠️ ERROR COMETIDO:</strong> ${escapeHTML(e.identifiedError)}</div>
+      <div class="viewer-block">
+        <h4>Enunciado Evaluado:</h4>
+        <p>${escapeHTML(e.statement)}</p>
       </div>
-      <div class="detail-field-group"><strong>4. Solución Correcta Paso a Paso:</strong><p>${escapeHTML(e.correctSolution)}</p></div>
-      ${e.verification ? `<div class="detail-field-group"><strong>5. Verificación del Resultado:</strong><div class="highlight-box">${escapeHTML(e.verification)}</div></div>` : ''}
-      <div class="detail-field-group">
-        <strong>6. Reflexión Preventiva para no Reincidir:</strong>
-        <div class="success-box"><strong>💡 ESTRATEGIA PREVENTIVA:</strong> ${escapeHTML(e.preventionReflection)}</div>
+      <div class="viewer-block warning">
+        <h4>Diagnóstico del Error Identificado:</h4>
+        <p>${escapeHTML(e.identifiedError)}</p>
       </div>
-      ${(e.files && e.files.length) ? `
-        <div class="detail-field-group">
-          <strong>Examen Calificado Adjunto:</strong>
-          <div class="evidence-gallery" style="margin-top: 10px;">
-            ${e.files.map(f => `
-              <div class="evidence-thumbnail-card" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${f.data}')">
-                <div class="evidence-thumb-img-wrap">
-                  ${f.type && f.type.startsWith("image/") ? `<img src="${f.data}" alt="Foto">` : '<span class="doc-icon">📄</span>'}
-                </div>
-                <div class="evidence-thumb-info">
-                  <span class="evidence-thumb-name">${escapeHTML(f.name)}</span>
-                  <span class="evidence-thumb-meta">Examen</span>
-                </div>
-              </div>
-            `).join("")}
-          </div>
+      <div class="viewer-block">
+        <h4>Solución Correcta Paso a Paso:</h4>
+        <pre class="viewer-pre">${escapeHTML(e.correctSolution)}</pre>
+      </div>
+      ${e.preventionReflection ? `
+        <div class="viewer-block success">
+          <h4>Estrategia para evitar el error:</h4>
+          <p>${escapeHTML(e.preventionReflection)}</p>
         </div>
       ` : ''}
     `;
   } else if (type === "learning") {
     const l = appDB.learnings.find(x => x.id === itemId);
     if (!l) return;
-    badge.textContent = "✦";
-    title.textContent = l.title;
+    title = l.title;
     contentHTML = `
-      <div class="activity-card-top" style="margin-bottom: 16px;">
-        <span class="topic-tag">${escapeHTML(getTopicTitleById(l.topicId))}</span>
+      <div class="viewer-section">
+        <span class="viewer-tag">METACOGNICIÓN · ${escapeHTML(getTopicTitleById(l.topicId))}</span>
+        <h3 class="viewer-title">${escapeHTML(l.title)}</h3>
       </div>
-      <div class="detail-field-group"><strong>1. ¿Qué dificultad encontré?</strong><p>${escapeHTML(l.difficulty)}</p></div>
-      <div class="detail-field-group"><strong>2. ¿Qué concepto o procedimiento no comprendía?</strong><p>${escapeHTML(l.uncomprehendedConcept)}</p></div>
-      <div class="detail-field-group"><strong>3. ¿Qué estrategia de aprendizaje utilicé?</strong><p>${escapeHTML(l.strategyUsed)}</p></div>
-      <div class="detail-field-group"><strong>4. ¿Qué ejercicios o recursos me ayudaron?</strong><p>${escapeHTML(l.helpfulResources)}</p></div>
-      <div class="detail-field-group"><strong>5. ¿Qué aprendí?</strong><p>${escapeHTML(l.whatILearned)}</p></div>
-      <div class="detail-field-group"><strong>6. ¿Cómo comprobé que mejoré?</strong><p>${escapeHTML(l.howIVerified)}</p></div>
-      ${l.personalReflection ? `<div class="detail-field-group"><strong>Reflexión Personal del Proceso:</strong><p>${escapeHTML(l.personalReflection)}</p></div>` : ''}
-      ${(l.files && l.files.length) ? `
-        <div class="detail-field-group">
-          <strong>Evidencias del Progreso Adjuntas:</strong>
-          <div class="evidence-gallery" style="margin-top: 10px;">
-            ${l.files.map(f => `
-              <div class="evidence-thumbnail-card" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${f.data}')">
-                <div class="evidence-thumb-img-wrap">
-                  ${f.type && f.type.startsWith("image/") ? `<img src="${f.data}" alt="Foto">` : '<span class="doc-icon">📄</span>'}
-                </div>
-                <div class="evidence-thumb-info">
-                  <span class="evidence-thumb-name">${escapeHTML(f.name)}</span>
-                  <span class="evidence-thumb-meta">Evidencia</span>
-                </div>
-              </div>
-            `).join("")}
-          </div>
+      <div class="viewer-block">
+        <h4>1. Dificultad Encontrada:</h4>
+        <p>${escapeHTML(l.difficulty)}</p>
+      </div>
+      <div class="viewer-block">
+        <h4>2. Estrategia Utilizada:</h4>
+        <p>${escapeHTML(l.strategyUsed)}</p>
+      </div>
+      <div class="viewer-block highlight">
+        <h4>3. Qué Aprendí:</h4>
+        <p>${escapeHTML(l.whatILearned)}</p>
+      </div>
+      ${l.personalReflection ? `
+        <div class="viewer-block">
+          <h4>Reflexión Personal:</h4>
+          <p>${escapeHTML(l.personalReflection)}</p>
         </div>
       ` : ''}
     `;
   }
 
+  document.getElementById("itemViewerTitle").textContent = title;
+  const body = document.getElementById("itemViewerBody");
   body.innerHTML = contentHTML;
   renderKaTeX(body);
   openModal("itemViewerModal");
 }
 
 // ============================================================================
-// 10. CONTROLADORES DE CONFIRMACIÓN Y ELIMINACIÓN
+// MODAL DE CONFIRMACIÓN DE ELIMINACIÓN SEGURA
 // ============================================================================
 
-function confirmDelete(type, id, parentTopicId = null) {
-  let itemTitle = "este elemento";
+function confirmDelete(type, id, extra = null) {
+  currentConfirmAction = { type, id, extra };
+  const promptEl = document.getElementById("confirmDialogPrompt");
 
-  if (type === "topic") {
-    const t = appDB.topics.find(x => x.id === id);
-    if (t) itemTitle = `el tema "${t.title}"`;
-  } else if (type === "definition") {
-    const t = appDB.topics.find(x => x.id === parentTopicId);
-    const d = t?.definitions?.find(x => x.id === id);
-    if (d) itemTitle = `la definición de "${d.term}"`;
-  } else if (type === "formula") {
-    const t = appDB.topics.find(x => x.id === parentTopicId);
-    const f = t?.formulas?.find(x => x.id === id);
-    if (f) itemTitle = `la fórmula "${f.name}"`;
-  } else if (type === "practice") {
-    const p = appDB.practices.find(x => x.id === id);
-    if (p) itemTitle = `la práctica "${p.title}"`;
-  } else if (type === "workshop") {
-    const w = appDB.workshops.find(x => x.id === id);
-    if (w) itemTitle = `el taller "${w.title}"`;
-  } else if (type === "exam") {
-    const e = appDB.exams.find(x => x.id === id);
-    if (e) itemTitle = `el parcial "${e.title}"`;
-  } else if (type === "learning") {
-    const l = appDB.learnings.find(x => x.id === id);
-    if (l) itemTitle = `la situación de aprendizaje "${l.title}"`;
-  }
-
-  currentConfirmAction = () => {
-    executeDelete(type, id, parentTopicId);
+  const names = {
+    topic: "este tema de estudio completo con todas sus secciones",
+    card: "esta tarjeta académica",
+    practiceFile: "este archivo de práctica",
+    workshop: "este taller y su desarrollo resuelto",
+    exam: "este parcial y su corrección analítica",
+    learning: "esta situación de aprendizaje metacognitiva"
   };
 
-  document.getElementById("confirmModalMessage").textContent =
-    `¿Estás seguro de que deseas eliminar permanentemente ${itemTitle}? Esta acción no se puede deshacer.`;
+  if (promptEl) {
+    promptEl.textContent = `¿Estás completamente seguro de que deseas eliminar ${names[type] || 'este registro'}? Esta acción no se puede deshacer.`;
+  }
+
   openModal("confirmModal");
 }
 
-function executeDelete(type, id, parentTopicId) {
+function executeDelete() {
+  if (!currentConfirmAction) return;
+  const { type, id, extra } = currentConfirmAction;
+
   if (type === "topic") {
     appDB.topics = appDB.topics.filter(t => t.id !== id);
-    saveDatabase();
-    renderApp();
-    if (currentView === "detail" && activeDetailTopicId === id) {
-      navigateToView("temas");
+    if (activeDetailTopicId === id) navigateToView("temas");
+    renderTemas();
+    showToast("Tema eliminado.", "info");
+  } else if (type === "card") {
+    const { topicId, section } = extra;
+    const topic = appDB.topics.find(t => t.id === topicId);
+    if (topic && Array.isArray(topic[section])) {
+      topic[section] = topic[section].filter(c => c.id !== id);
+      renderTopicDetail(topicId);
+      showToast("Tarjeta eliminada.", "info");
     }
-    showToast("Tema eliminado correctamente.", "info");
-  } else if (type === "definition") {
-    const t = appDB.topics.find(x => x.id === parentTopicId);
-    if (t && t.definitions) {
-      t.definitions = t.definitions.filter(d => d.id !== id);
-      saveDatabase();
-      renderApp();
-      showToast("Definición eliminada.", "info");
-    }
-  } else if (type === "formula") {
-    const t = appDB.topics.find(x => x.id === parentTopicId);
-    if (t && t.formulas) {
-      t.formulas = t.formulas.filter(f => f.id !== id);
-      saveDatabase();
-      renderApp();
-      showToast("Fórmula eliminada.", "info");
-    }
-  } else if (type === "practice") {
-    appDB.practices = appDB.practices.filter(p => p.id !== id);
-    saveDatabase();
-    renderApp();
-    showToast("Práctica eliminada.", "info");
+  } else if (type === "practiceFile") {
+    appDB.practiceFiles = (appDB.practiceFiles || []).filter(f => f.id !== id);
+    FileStorage.deleteFile(id);
+    renderPracticasFilesList();
+    showToast("Archivo de práctica eliminado.", "info");
   } else if (type === "workshop") {
     appDB.workshops = appDB.workshops.filter(w => w.id !== id);
-    saveDatabase();
-    renderApp();
+    renderTalleres();
     showToast("Taller eliminado.", "info");
   } else if (type === "exam") {
     appDB.exams = appDB.exams.filter(e => e.id !== id);
-    saveDatabase();
-    renderApp();
-    showToast("Examen eliminado.", "info");
+    renderParciales();
+    showToast("Parcial eliminado.", "info");
   } else if (type === "learning") {
     appDB.learnings = appDB.learnings.filter(l => l.id !== id);
-    saveDatabase();
-    renderApp();
-    showToast("Situación de aprendizaje eliminada.", "info");
+    renderAprendizaje();
+    showToast("Situación eliminada.", "info");
   }
-}
 
-function closeConfirmDialog() {
+  scheduleAutoSave(0);
+  updateNavBadges();
   closeModal("confirmModal");
   currentConfirmAction = null;
 }
 
 // ============================================================================
-// 11. VISOR DE ARCHIVO / LIGHTBOX
+// VISOR DE ARCHIVOS Y MULTIMEDIA (FileViewerModal)
 // ============================================================================
 
 function openFileViewer(name, type, data) {
-  const modal = document.getElementById("fileViewerModal");
-  const title = document.getElementById("fileViewerTitle");
-  const body = document.getElementById("fileViewerBody");
-  const download = document.getElementById("fileViewerDownloadBtn");
-
-  if (!modal || !body) return;
-
-  if (title) title.textContent = name || "Vista Previa de Evidencia";
-  if (download) {
-    download.href = data;
-    download.download = name || "evidencia";
+  if (!data) {
+    showToast("No hay vista previa disponible para este archivo.", "info");
+    return;
   }
 
-  if (type && type.startsWith("image/") && data) {
-    body.innerHTML = `<img src="${data}" alt="${escapeHTML(name)}">`;
-  } else if (type === "application/pdf" && data) {
-    body.innerHTML = `<iframe src="${data}" style="width:100%; height:550px; border:none;"></iframe>`;
-  } else {
+  document.getElementById("fileViewerTitle").textContent = name || "Vista de Archivo";
+  const body = document.getElementById("fileViewerBody");
+  const isPdf = (type && type.includes("pdf")) || (name && name.toLowerCase().endsWith(".pdf"));
+
+  if (isPdf) {
     body.innerHTML = `
-      <div style="text-align: center; color: #FFFFFF; padding: 40px;">
-        <p style="font-size: 40px; margin-bottom: 12px;">📄</p>
-        <h4>${escapeHTML(name)}</h4>
-        <p style="font-size: 13px; color: #94A3B8; margin-top: 8px;">Este archivo puede descargarse en tu computadora.</p>
-        <a href="${data}" download="${escapeHTML(name)}" class="btn btn-accent btn-sm" style="margin-top: 16px;">Descargar archivo</a>
+      <div style="height: 60vh; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px;">
+        <object data="${data}" type="application/pdf" width="100%" height="100%">
+          <div style="text-align: center; padding: 30px;">
+            <p>Tu navegador no admite visualización directa embebida del PDF.</p>
+            <a href="${data}" target="_blank" class="btn btn-primary">Abrir PDF en pestaña nueva</a>
+          </div>
+        </object>
       </div>
     `;
+  } else {
+    body.innerHTML = `
+      <div style="display: flex; justify-content: center; align-items: center; max-height: 70vh; overflow: auto;">
+        <img src="${data}" alt="${escapeHTML(name)}" style="max-width: 100%; max-height: 68vh; object-fit: contain; border-radius: 8px;">
+      </div>
+    `;
+  }
+
+  const downloadBtn = document.getElementById("fileViewerDownloadBtn");
+  if (downloadBtn) {
+    downloadBtn.onclick = () => downloadFileDirectly(name, data);
   }
 
   openModal("fileViewerModal");
 }
 
-function closeFileViewer() {
-  closeModal("fileViewerModal");
+// ============================================================================
+// GESTIÓN DE MODALES (APERTURA Y CIERRE CON RETENCIÓN DE SCROLL)
+// ============================================================================
+
+function openModal(modalId) {
+  const modal = document.getElementById(modalId);
+  if (modal) {
+    modal.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+}
+
+function closeModal(modalId) {
+  const modal = document.getElementById(modalId);
+  if (modal) {
+    modal.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+  flushAutoSave();
 }
 
 // ============================================================================
-// 12. EXPORTACIÓN E IMPORTACIÓN DE COPIAS DE SEGURIDAD
+// RESPALDO Y COPIAS DE SEGURIDAD (EXPORTACIÓN E IMPORTACIÓN JSON COMPLETA)
 // ============================================================================
 
-function exportBackupJSON() {
-  const backupData = {
-    application: "Portafolio Digital de Física I",
-    version: "3.0",
+async function exportBackupJSON() {
+  flushAutoSave();
+  showToast("Preparando exportación completa con archivos...", "info");
+
+  const files = await FileStorage.getAllFiles();
+  const payload = {
+    app: "Portafolio Digital de Física I",
+    version: "3.5",
     exportedAt: new Date().toISOString(),
-    database: appDB
+    db: appDB,
+    storedFiles: files
   };
 
-  const jsonString = JSON.stringify(backupData, null, 2);
-  const blob = new Blob([jsonString], { type: "application/json" });
+  const jsonStr = JSON.stringify(payload, null, 2);
+  const blob = new Blob([jsonStr], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-
-  const dateStr = new Date().toISOString().slice(0, 10);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `respaldo-portafolio-fisica-I-${dateStr}.json`;
+  a.download = `Portafolio_Fisica_I_Respaldo_${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
+  a.remove();
   URL.revokeObjectURL(url);
-
-  showToast("Copia de seguridad exportada en archivo JSON.", "success");
+  showToast("✓ Copia de seguridad exportada con éxito.", "success");
 }
 
 function importBackupJSON(file) {
   if (!file) return;
-
   const reader = new FileReader();
-  reader.onload = (e) => {
+  reader.onload = async (e) => {
     try {
       const data = JSON.parse(e.target.result);
-      const incomingDB = data.database || data;
+      const importedDB = data.db || data;
 
-      if (!incomingDB || (!incomingDB.topics && !Array.isArray(incomingDB))) {
-        throw new Error("Formato inválido");
+      if (!importedDB.topics) {
+        showToast("El archivo seleccionado no tiene un formato de portafolio válido.", "error");
+        return;
       }
 
-      currentConfirmAction = () => {
-        if (incomingDB.topics && Array.isArray(incomingDB.topics)) {
-          appDB = incomingDB;
-        } else if (Array.isArray(incomingDB)) {
-          appDB.topics = incomingDB;
+      // Restaurar archivos a IndexedDB si vienen en el respaldo
+      if (Array.isArray(data.storedFiles)) {
+        for (const f of data.storedFiles) {
+          if (f.id && f.data) {
+            await FileStorage.saveFile(f.id, f.name, f.type, f.size, f.data);
+          }
         }
-        saveDatabase();
-        renderApp();
-        navigateToView("inicio");
-        showToast("Copia de seguridad importada exitosamente.", "success");
-      };
+      }
 
-      document.getElementById("confirmModalMessage").textContent =
-        "La importación reemplazará los datos actuales del portafolio. ¿Deseas continuar con la restauración?";
-      openModal("confirmModal");
+      appDB = importedDB;
+      saveDatabase();
+      renderApp();
+      showToast("✓ Portafolio restaurado correctamente desde el respaldo.", "success");
     } catch (err) {
-      console.error("Error al importar:", err);
-      showToast("El archivo seleccionado no tiene un formato válido de portafolio.", "error");
+      console.error("Error al importar JSON:", err);
+      showToast("Error al procesar el archivo JSON.", "error");
     }
   };
   reader.readAsText(file);
 }
 
 function restoreDefaultData() {
-  currentConfirmAction = () => {
+  if (confirm("¿Deseas restablecer los contenidos académicos de ejemplo? Se mantendrá guardado.")) {
     appDB = structuredClone(DEFAULT_DB);
     saveDatabase();
     renderApp();
-    navigateToView("inicio");
-    showToast("Datos de ejemplo iniciales restaurados con éxito.", "success");
-  };
-
-  document.getElementById("confirmModalMessage").textContent =
-    "Esta acción restablecerá los 3 temas modelo con sus prácticas, talleres y evaluaciones de ejemplo. ¿Deseas continuar?";
-  openModal("confirmModal");
+    showToast("✓ Datos de ejemplo restaurados.", "success");
+  }
 }
 
 function clearAllData() {
-  currentConfirmAction = () => {
+  if (confirm("¿Estás seguro de que deseas borrar TODOS los registros? Se vaciarán los temas y actividades.")) {
     appDB = {
       profile: structuredClone(DEFAULT_DB.profile),
       topics: [],
-      practices: [],
+      practiceFiles: [],
       workshops: [],
       exams: [],
       learnings: []
     };
     saveDatabase();
     renderApp();
-    navigateToView("temas");
-    showToast("Se han eliminado todos los registros almacenados.", "info");
-  };
-
-  document.getElementById("confirmModalMessage").textContent =
-    "¡Atención! Se eliminarán TODOS los temas y evaluaciones registradas. Se recomienda descargar un respaldo antes.";
-  openModal("confirmModal");
+    showToast("Todos los datos han sido borrados.", "info");
+  }
 }
 
 // ============================================================================
-// 13. INICIALIZACIÓN DE EVENTOS Y REGISTRO DE FORMULARIOS
+// INICIALIZACIÓN DE LA APLICACIÓN Y EVENT LISTENERS
 // ============================================================================
 
-document.addEventListener("DOMContentLoaded", () => {
-  // 1. Navegación en Barra Lateral
+document.addEventListener("DOMContentLoaded", async () => {
+  // Inicializar IndexedDB en segundo plano
+  await FileStorage.init();
+
+  // Enlazar navegación de la barra lateral
   document.querySelectorAll(".nav-item").forEach(btn => {
-    btn.addEventListener("click", () => {
-      navigateToView(btn.getAttribute("data-view"));
-    });
+    btn.onclick = () => {
+      const view = btn.getAttribute("data-view");
+      if (view) navigateToView(view);
+    };
   });
 
-  // 2. Control del menú móvil
+  // Toggle menú móvil
   document.getElementById("mobileMenuBtn")?.addEventListener("click", openMobileMenu);
   document.getElementById("sidebarCloseBtn")?.addEventListener("click", closeMobileMenu);
   document.getElementById("sidebarBackdrop")?.addEventListener("click", closeMobileMenu);
 
-  // 3. Botones de acción rápida en topbar e inicio
-  document.getElementById("topbarQuickAddBtn")?.addEventListener("click", () => openTopicModal());
-  document.getElementById("heroCreateTopicBtn")?.addEventListener("click", () => openTopicModal());
-  document.getElementById("heroExploreTopicsBtn")?.addEventListener("click", () => navigateToView("temas"));
-  document.getElementById("homeViewAllTopicsBtn")?.addEventListener("click", () => navigateToView("temas"));
-  document.getElementById("btnOpenNewTopicModal")?.addEventListener("click", () => openTopicModal());
+  // Botón volver a temas
+  document.getElementById("detailBackBtn")?.addEventListener("click", () => navigateToView("temas"));
 
-  // Navegación desde tarjetas KPI en Inicio
-  document.querySelectorAll(".stat-card[data-goto-view]").forEach(card => {
-    card.addEventListener("click", () => {
-      navigateToView(card.getAttribute("data-goto-view"));
-    });
+  // Botón editar tema desde detalle
+  document.getElementById("detailEditTopicBtn")?.addEventListener("click", () => {
+    if (activeDetailTopicId) openTopicModal(activeDetailTopicId);
   });
 
-  // Botones para registrar en cada sección independiente
-  document.getElementById("btnOpenNewPracticeModal")?.addEventListener("click", () => openPracticeModal());
+  // Botón eliminar tema desde detalle
+  document.getElementById("detailDeleteTopicBtn")?.addEventListener("click", () => {
+    if (activeDetailTopicId) confirmDelete("topic", activeDetailTopicId);
+  });
+
+  // Botón crear nuevo tema en topbar y en temas
+  document.getElementById("topbarQuickAddBtn")?.addEventListener("click", () => openTopicModal());
+  document.getElementById("btnOpenNewTopicModal")?.addEventListener("click", () => openTopicModal());
+
+  // Botones de crear en actividades independientes
   document.getElementById("btnOpenNewWorkshopModal")?.addEventListener("click", () => openWorkshopModal());
   document.getElementById("btnOpenNewExamModal")?.addEventListener("click", () => openExamModal());
   document.getElementById("btnOpenNewLearningModal")?.addEventListener("click", () => openLearningModal());
 
-  // Navegación de regreso en Detalle
-  document.getElementById("detailBackBtn")?.addEventListener("click", () => navigateToView("temas"));
+  // Acceso rápido a todos los temas en inicio
+  document.getElementById("homeViewAllTopicsBtn")?.addEventListener("click", () => navigateToView("temas"));
 
-  // 4. Búsqueda y Filtros de Temas
-  const searchTopicsInput = document.getElementById("searchTopicsInput");
-  if (searchTopicsInput) {
-    searchTopicsInput.addEventListener("input", (e) => {
-      filters.topicsSearch = e.target.value;
+  // Tarjetas KPI de Inicio con data-goto-view
+  document.querySelectorAll("[data-goto-view]").forEach(card => {
+    card.onclick = () => {
+      const v = card.getAttribute("data-goto-view");
+      if (v) navigateToView(v);
+    };
+  });
+
+  // Búsqueda y filtros de Temas
+  const searchTopics = document.getElementById("searchTopicsInput");
+  if (searchTopics) {
+    searchTopics.oninput = () => {
+      filters.topicsSearch = searchTopics.value;
       renderTemas();
-    });
+    };
   }
 
   document.querySelectorAll("[data-filter-topics]").forEach(chip => {
-    chip.addEventListener("click", () => {
+    chip.onclick = () => {
       document.querySelectorAll("[data-filter-topics]").forEach(c => c.classList.remove("active"));
       chip.classList.add("active");
       filters.topicsStatus = chip.getAttribute("data-filter-topics");
       renderTemas();
-    });
+    };
   });
 
   document.getElementById("emptyResetTopicFilterBtn")?.addEventListener("click", () => {
-    if (searchTopicsInput) searchTopicsInput.value = "";
     filters.topicsSearch = "";
     filters.topicsStatus = "all";
-    document.querySelectorAll("[data-filter-topics]").forEach(c => c.classList.toggle("active", c.getAttribute("data-filter-topics") === "all"));
+    if (searchTopics) searchTopics.value = "";
+    document.querySelectorAll("[data-filter-topics]").forEach(c => c.classList.remove("active"));
+    document.querySelector("[data-filter-topics='all']")?.classList.add("active");
     renderTemas();
   });
 
-  // 5. Filtros de Prácticas
-  document.getElementById("searchPracticesInput")?.addEventListener("input", (e) => {
-    filters.practicesSearch = e.target.value;
-    renderPracticas();
-  });
-  document.getElementById("filterPracticeTopicSelect")?.addEventListener("change", (e) => {
-    filters.practicesTopic = e.target.value;
-    renderPracticas();
-  });
-
-  // 6. Filtros de Talleres
-  document.getElementById("searchWorkshopsInput")?.addEventListener("input", (e) => {
-    filters.workshopsSearch = e.target.value;
-    renderTalleres();
-  });
-  document.getElementById("filterWorkshopTopicSelect")?.addEventListener("change", (e) => {
-    filters.workshopsTopic = e.target.value;
-    renderTalleres();
-  });
-
-  // 7. Filtros de Parciales
-  document.getElementById("searchExamsInput")?.addEventListener("input", (e) => {
-    filters.examsSearch = e.target.value;
-    renderParciales();
-  });
-  document.getElementById("filterExamTopicSelect")?.addEventListener("change", (e) => {
-    filters.examsTopic = e.target.value;
-    renderParciales();
-  });
-
-  // 8. Filtros de Aprendizaje
-  document.getElementById("searchLearningsInput")?.addEventListener("input", (e) => {
-    filters.learningsSearch = e.target.value;
-    renderAprendizaje();
-  });
-  document.getElementById("filterLearningTopicSelect")?.addEventListener("change", (e) => {
-    filters.learningsTopic = e.target.value;
-    renderAprendizaje();
-  });
-
-  // 9. FORMULARIO: TEMA
-  document.getElementById("topicFormMapFile")?.addEventListener("change", async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      const read = await readFilesSafely([files[0]]);
-      if (read.length > 0) {
-        pendingTopicMapFile = read[0];
-        renderTopicMapPreview();
-      }
-    }
-    e.target.value = "";
-  });
-
-  document.getElementById("topicForm")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const titleVal = document.getElementById("topicFormTitle").value.trim();
-    const descVal = document.getElementById("topicFormDesc").value.trim();
-
-    if (!titleVal) {
-      showToast("Por favor ingresa el título del tema.", "warning");
-      document.getElementById("topicFormTitle").focus();
-      return;
-    }
-    if (!descVal) {
-      showToast("Por favor ingresa una breve descripción del tema.", "warning");
-      document.getElementById("topicFormDesc").focus();
-      return;
-    }
-
-    const editId = document.getElementById("topicFormId").value;
-    const orderVal = Number(document.getElementById("topicFormOrder").value) || 1;
-    const statusVal = document.getElementById("topicFormStatus").value;
-    const hoursVal = document.getElementById("topicFormHours").value.trim();
-    const conceptVal = document.getElementById("topicFormConceptual").value.trim();
-
-    if (editId) {
-      // Modificar existente sin duplicar
-      const idx = appDB.topics.findIndex(t => t.id === editId);
-      if (idx >= 0) {
-        appDB.topics[idx].title = titleVal;
-        appDB.topics[idx].order = orderVal;
-        appDB.topics[idx].status = statusVal;
-        appDB.topics[idx].estimatedHours = hoursVal;
-        appDB.topics[idx].description = descVal;
-        appDB.topics[idx].conceptualScheme = conceptVal;
-        if (pendingTopicMapFile !== undefined) {
-          appDB.topics[idx].mapFile = pendingTopicMapFile;
-        }
-      }
-      showToast(`Tema "${titleVal}" actualizado correctamente.`, "success");
-    } else {
-      // Crear nuevo registro con ID único
-      const newTopic = {
-        id: generateUniqueId("tema"),
-        order: orderVal,
-        title: titleVal,
-        status: statusVal,
-        estimatedHours: hoursVal,
-        description: descVal,
-        conceptualScheme: conceptVal,
-        mapFile: pendingTopicMapFile || null,
-        definitions: [],
-        formulas: [],
-        files: []
-      };
-      appDB.topics.push(newTopic);
-      showToast(`Tema "${titleVal}" registrado en el portafolio.`, "success");
-    }
-
-    saveDatabase();
-    renderApp();
-    closeModal("topicModal");
-    if (editId && currentView === "detail" && activeDetailTopicId === editId) {
-      renderTopicDetail(editId);
-    }
-  });
-
-  // 10. FORMULARIO: DEFINICIÓN
-  document.getElementById("definitionForm")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const termVal = document.getElementById("defFormTerm").value.trim();
-    const defVal = document.getElementById("defFormDefinition").value.trim();
-    const topicIdVal = document.getElementById("defFormTopicSelect").value;
-
-    if (!termVal) {
-      showToast("Por favor ingresa el término o concepto.", "warning");
-      document.getElementById("defFormTerm").focus();
-      return;
-    }
-    if (!defVal) {
-      showToast("Por favor ingresa la definición.", "warning");
-      document.getElementById("defFormDefinition").focus();
-      return;
-    }
-    if (!topicIdVal) {
-      showToast("Selecciona el tema correspondiente para esta definición.", "warning");
-      document.getElementById("defFormTopicSelect").focus();
-      return;
-    }
-
-    const editId = document.getElementById("defFormId").value;
-    const topic = appDB.topics.find(t => t.id === topicIdVal);
-    if (!topic) {
-      showToast("No se encontró el tema seleccionado.", "error");
-      return;
-    }
-    if (!topic.definitions) topic.definitions = [];
-
-    if (editId) {
-      // Actualizar definición existente
-      let updated = false;
-      for (const t of appDB.topics) {
-        const dIdx = (t.definitions || []).findIndex(d => d.id === editId);
-        if (dIdx >= 0) {
-          if (t.id === topicIdVal) {
-            t.definitions[dIdx].term = termVal;
-            t.definitions[dIdx].definition = defVal;
-          } else {
-            // Se movió de tema
-            t.definitions.splice(dIdx, 1);
-            topic.definitions.push({ id: editId, term: termVal, definition: defVal });
-          }
-          updated = true;
-          break;
-        }
-      }
-      if (!updated) {
-        topic.definitions.push({ id: editId, term: termVal, definition: defVal });
-      }
-      showToast(`Definición de "${termVal}" actualizada.`, "success");
-    } else {
-      // Crear nueva definición
-      topic.definitions.push({
-        id: generateUniqueId("def"),
-        term: termVal,
-        definition: defVal
-      });
-      showToast(`Definición de "${termVal}" agregada.`, "success");
-    }
-
-    saveDatabase();
-    renderApp();
-    closeModal("definitionModal");
-    if (currentView === "detail" && activeDetailTopicId === topicIdVal) {
-      renderTopicDetail(topicIdVal);
-    }
-  });
-
-  // 11. FORMULARIO: FÓRMULA (CON VISTA PREVIA KATEX)
-  document.getElementById("formulaFormLatex")?.addEventListener("input", (e) => {
-    updateFormulaLivePreview(e.target.value);
-  });
-
-  document.getElementById("formulaForm")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const nameVal = document.getElementById("formulaFormName").value.trim();
-    const latexVal = document.getElementById("formulaFormLatex").value.trim();
-    const topicIdVal = document.getElementById("formulaFormTopicSelect").value;
-
-    if (!nameVal) {
-      showToast("Ingresa el nombre de la ecuación.", "warning");
-      document.getElementById("formulaFormName").focus();
-      return;
-    }
-    if (!latexVal) {
-      showToast("Ingresa la expresión en código LaTeX.", "warning");
-      document.getElementById("formulaFormLatex").focus();
-      return;
-    }
-    if (!topicIdVal) {
-      showToast("Selecciona el tema de la fórmula.", "warning");
-      document.getElementById("formulaFormTopicSelect").focus();
-      return;
-    }
-
-    const editId = document.getElementById("formulaFormId").value;
-    const varsVal = document.getElementById("formulaFormVars").value.trim();
-    const condVal = document.getElementById("formulaFormConditions").value.trim();
-    const examVal = document.getElementById("formulaFormExample").value.trim();
-
-    const topic = appDB.topics.find(t => t.id === topicIdVal);
-    if (!topic) return;
-    if (!topic.formulas) topic.formulas = [];
-
-    const formulaData = {
-      name: nameVal,
-      latex: latexVal,
-      variables: varsVal,
-      conditions: condVal,
-      example: examVal
+  // Búsqueda de Prácticas
+  const searchPractices = document.getElementById("searchPracticesInput");
+  if (searchPractices) {
+    searchPractices.oninput = () => {
+      filters.practicesSearch = searchPractices.value;
+      renderPracticasFilesList();
     };
+  }
 
-    if (editId) {
-      // Actualizar sin duplicar
-      let updated = false;
-      for (const t of appDB.topics) {
-        const fIdx = (t.formulas || []).findIndex(f => f.id === editId);
-        if (fIdx >= 0) {
-          if (t.id === topicIdVal) {
-            t.formulas[fIdx] = { ...formulaData, id: editId };
-          } else {
-            t.formulas.splice(fIdx, 1);
-            topic.formulas.push({ ...formulaData, id: editId });
-          }
-          updated = true;
-          break;
-        }
-      }
-      if (!updated) {
-        topic.formulas.push({ ...formulaData, id: editId });
-      }
-      showToast(`Fórmula "${nameVal}" actualizada.`, "success");
-    } else {
-      topic.formulas.push({
-        ...formulaData,
-        id: generateUniqueId("form")
-      });
-      showToast(`Fórmula "${nameVal}" guardada exitosamente.`, "success");
-    }
-
-    saveDatabase();
-    renderApp();
-    closeModal("formulaModal");
-    if (currentView === "detail" && activeDetailTopicId === topicIdVal) {
-      renderTopicDetail(topicIdVal);
-    }
-  });
-
-  // 12. FORMULARIO: PRÁCTICA
-  document.getElementById("practiceFormFiles")?.addEventListener("change", async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      const read = await readFilesSafely(files);
-      pendingPracticeFiles.push(...read);
-      renderPendingFilesList("practiceFormFilesPreview", pendingPracticeFiles, "practice");
-    }
-    e.target.value = "";
-  });
-
-  document.getElementById("practiceForm")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const titleVal = document.getElementById("practiceFormTitle").value.trim();
-    const objVal = document.getElementById("practiceFormObjectives").value.trim();
-
-    if (!titleVal) {
-      showToast("Ingresa el título de la práctica.", "warning");
-      document.getElementById("practiceFormTitle").focus();
-      return;
-    }
-    if (!objVal) {
-      showToast("Ingresa los objetivos de la práctica.", "warning");
-      document.getElementById("practiceFormObjectives").focus();
-      return;
-    }
-
-    const editId = document.getElementById("practiceFormId").value;
-    const practiceData = {
-      title: titleVal,
-      date: document.getElementById("practiceFormDate").value || "",
-      topicId: document.getElementById("practiceFormTopicSelect").value || "",
-      statement: document.getElementById("practiceFormStatement").value.trim(),
-      objectives: objVal,
-      materials: document.getElementById("practiceFormMaterials").value.trim(),
-      data: document.getElementById("practiceFormData").value.trim(),
-      procedure: document.getElementById("practiceFormProcedure").value.trim(),
-      calculations: document.getElementById("practiceFormCalculations").value.trim(),
-      results: document.getElementById("practiceFormResults").value.trim(),
-      conclusions: document.getElementById("practiceFormConclusions").value.trim(),
-      files: [...pendingPracticeFiles]
+  // Búsqueda y filtros de Talleres
+  const searchWorkshops = document.getElementById("searchWorkshopsInput");
+  if (searchWorkshops) {
+    searchWorkshops.oninput = () => {
+      filters.workshopsSearch = searchWorkshops.value;
+      renderTalleres();
     };
-
-    if (editId) {
-      const idx = appDB.practices.findIndex(p => p.id === editId);
-      if (idx >= 0) {
-        appDB.practices[idx] = { ...practiceData, id: editId };
-      }
-      showToast(`Práctica "${titleVal}" actualizada.`, "success");
-    } else {
-      appDB.practices.push({
-        ...practiceData,
-        id: generateUniqueId("prac")
-      });
-      showToast(`Práctica "${titleVal}" registrada con éxito.`, "success");
-    }
-
-    saveDatabase();
-    renderApp();
-    closeModal("practiceModal");
-    if (currentView === "detail" && activeDetailTopicId) {
-      renderTopicDetail(activeDetailTopicId);
-    }
-  });
-
-  // 13. FORMULARIO: TALLER
-  document.getElementById("workshopFormFiles")?.addEventListener("change", async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      const read = await readFilesSafely(files);
-      pendingWorkshopFiles.push(...read);
-      renderPendingFilesList("workshopFormFilesPreview", pendingWorkshopFiles, "workshop");
-    }
-    e.target.value = "";
-  });
-
-  document.getElementById("workshopForm")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const titleVal = document.getElementById("workshopFormTitle").value.trim();
-    const statVal = document.getElementById("workshopFormStatement").value.trim();
-    const stepVal = document.getElementById("workshopFormStepByStep").value.trim();
-    const ansVal = document.getElementById("workshopFormAnswer").value.trim();
-
-    if (!titleVal) {
-      showToast("Ingresa el título o número del taller.", "warning");
-      document.getElementById("workshopFormTitle").focus();
-      return;
-    }
-    if (!statVal) {
-      showToast("Ingresa el enunciado del problema.", "warning");
-      document.getElementById("workshopFormStatement").focus();
-      return;
-    }
-    if (!stepVal) {
-      showToast("Ingresa el procedimiento paso a paso.", "warning");
-      document.getElementById("workshopFormStepByStep").focus();
-      return;
-    }
-    if (!ansVal) {
-      showToast("Ingresa la respuesta final con sus unidades.", "warning");
-      document.getElementById("workshopFormAnswer").focus();
-      return;
-    }
-
-    const editId = document.getElementById("workshopFormId").value;
-    const workshopData = {
-      title: titleVal,
-      date: document.getElementById("workshopFormDate").value || "",
-      topicId: document.getElementById("workshopFormTopicSelect").value || "",
-      statement: statVal,
-      formulas: document.getElementById("workshopFormFormulas").value.trim(),
-      stepByStep: stepVal,
-      finalAnswer: ansVal,
-      verification: document.getElementById("workshopFormVerification").value.trim(),
-      reflection: document.getElementById("workshopFormReflection").value.trim(),
-      files: [...pendingWorkshopFiles]
+  }
+  const filterWorkshopTopic = document.getElementById("filterWorkshopTopicSelect");
+  if (filterWorkshopTopic) {
+    filterWorkshopTopic.onchange = () => {
+      filters.workshopsTopic = filterWorkshopTopic.value;
+      renderTalleres();
     };
+  }
 
-    if (editId) {
-      const idx = appDB.workshops.findIndex(w => w.id === editId);
-      if (idx >= 0) {
-        appDB.workshops[idx] = { ...workshopData, id: editId };
-      }
-      showToast(`Taller "${titleVal}" actualizado.`, "success");
-    } else {
-      appDB.workshops.push({
-        ...workshopData,
-        id: generateUniqueId("tall")
-      });
-      showToast(`Taller "${titleVal}" registrado con éxito.`, "success");
-    }
-
-    saveDatabase();
-    renderApp();
-    closeModal("workshopModal");
-    if (currentView === "detail" && activeDetailTopicId) {
-      renderTopicDetail(activeDetailTopicId);
-    }
-  });
-
-  // 14. FORMULARIO: PARCIAL
-  document.getElementById("examFormFiles")?.addEventListener("change", async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      const read = await readFilesSafely(files);
-      pendingExamFiles.push(...read);
-      renderPendingFilesList("examFormFilesPreview", pendingExamFiles, "exam");
-    }
-    e.target.value = "";
-  });
-
-  document.getElementById("examForm")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const titleVal = document.getElementById("examFormTitle").value.trim();
-    const statVal = document.getElementById("examFormStatement").value.trim();
-    const origVal = document.getElementById("examFormOriginal").value.trim();
-    const errVal = document.getElementById("examFormError").value.trim();
-    const solVal = document.getElementById("examFormCorrectSolution").value.trim();
-    const reflVal = document.getElementById("examFormReflection").value.trim();
-
-    if (!titleVal) {
-      showToast("Ingresa el nombre o número del parcial.", "warning");
-      document.getElementById("examFormTitle").focus();
-      return;
-    }
-    if (!statVal) {
-      showToast("Ingresa el enunciado de la pregunta.", "warning");
-      document.getElementById("examFormStatement").focus();
-      return;
-    }
-    if (!origVal) {
-      showToast("Describe el procedimiento original realizado.", "warning");
-      document.getElementById("examFormOriginal").focus();
-      return;
-    }
-    if (!errVal) {
-      showToast("Describe el error identificado (diagnóstico).", "warning");
-      document.getElementById("examFormError").focus();
-      return;
-    }
-    if (!solVal) {
-      showToast("Ingresa la solución correcta paso a paso.", "warning");
-      document.getElementById("examFormCorrectSolution").focus();
-      return;
-    }
-    if (!reflVal) {
-      showToast("Ingresa la reflexión preventiva.", "warning");
-      document.getElementById("examFormReflection").focus();
-      return;
-    }
-
-    const editId = document.getElementById("examFormId").value;
-    const examData = {
-      title: titleVal,
-      date: document.getElementById("examFormDate").value || "",
-      topicId: document.getElementById("examFormTopicSelect").value || "",
-      evaluatedContents: document.getElementById("examFormContents").value.trim(),
-      statement: statVal,
-      originalProcedure: origVal,
-      identifiedError: errVal,
-      correctSolution: solVal,
-      verification: document.getElementById("examFormVerification").value.trim(),
-      preventionReflection: reflVal,
-      files: [...pendingExamFiles]
+  // Búsqueda y filtros de Parciales
+  const searchExams = document.getElementById("searchExamsInput");
+  if (searchExams) {
+    searchExams.oninput = () => {
+      filters.examsSearch = searchExams.value;
+      renderParciales();
     };
-
-    if (editId) {
-      const idx = appDB.exams.findIndex(e => e.id === editId);
-      if (idx >= 0) {
-        appDB.exams[idx] = { ...examData, id: editId };
-      }
-      showToast(`Corrección "${titleVal}" actualizada.`, "success");
-    } else {
-      appDB.exams.push({
-        ...examData,
-        id: generateUniqueId("parc")
-      });
-      showToast(`Corrección "${titleVal}" guardada con éxito.`, "success");
-    }
-
-    saveDatabase();
-    renderApp();
-    closeModal("examModal");
-    if (currentView === "detail" && activeDetailTopicId) {
-      renderTopicDetail(activeDetailTopicId);
-    }
-  });
-
-  // 15. FORMULARIO: METACOGNICIÓN
-  document.getElementById("learningFormFiles")?.addEventListener("change", async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      const read = await readFilesSafely(files);
-      pendingLearningFiles.push(...read);
-      renderPendingFilesList("learningFormFilesPreview", pendingLearningFiles, "learning");
-    }
-    e.target.value = "";
-  });
-
-  document.getElementById("learningForm")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const titleVal = document.getElementById("learningFormTitle").value.trim();
-    const diffVal = document.getElementById("learningFormDifficulty").value.trim();
-    const learnVal = document.getElementById("learningFormWhatLearned").value.trim();
-
-    if (!titleVal) {
-      showToast("Ingresa el título de la situación.", "warning");
-      document.getElementById("learningFormTitle").focus();
-      return;
-    }
-    if (!diffVal) {
-      showToast("Describe la dificultad encontrada.", "warning");
-      document.getElementById("learningFormDifficulty").focus();
-      return;
-    }
-    if (!learnVal) {
-      showToast("Indica qué aprendiste superando este problema.", "warning");
-      document.getElementById("learningFormWhatLearned").focus();
-      return;
-    }
-
-    const editId = document.getElementById("learningFormId").value;
-    const learningData = {
-      title: titleVal,
-      topicId: document.getElementById("learningFormTopicSelect").value || "",
-      difficulty: diffVal,
-      uncomprehendedConcept: document.getElementById("learningFormConcept").value.trim(),
-      strategyUsed: document.getElementById("learningFormStrategy").value.trim(),
-      helpfulResources: document.getElementById("learningFormResources").value.trim(),
-      whatILearned: learnVal,
-      howIVerified: document.getElementById("learningFormVerification").value.trim(),
-      personalReflection: document.getElementById("learningFormReflection").value.trim(),
-      files: [...pendingLearningFiles]
+  }
+  const filterExamTopic = document.getElementById("filterExamTopicSelect");
+  if (filterExamTopic) {
+    filterExamTopic.onchange = () => {
+      filters.examsTopic = filterExamTopic.value;
+      renderParciales();
     };
+  }
 
-    if (editId) {
-      const idx = appDB.learnings.findIndex(l => l.id === editId);
-      if (idx >= 0) {
-        appDB.learnings[idx] = { ...learningData, id: editId };
-      }
-      showToast(`Situación de aprendizaje actualizada.`, "success");
-    } else {
-      appDB.learnings.push({
-        ...learningData,
-        id: generateUniqueId("learn")
-      });
-      showToast(`Situación de aprendizaje guardada con éxito.`, "success");
-    }
+  // Búsqueda y filtros de Metacognición
+  const searchLearnings = document.getElementById("searchLearningsInput");
+  if (searchLearnings) {
+    searchLearnings.oninput = () => {
+      filters.learningsSearch = searchLearnings.value;
+      renderAprendizaje();
+    };
+  }
+  const filterLearningTopic = document.getElementById("filterLearningTopicSelect");
+  if (filterLearningTopic) {
+    filterLearningTopic.onchange = () => {
+      filters.learningsTopic = filterLearningTopic.value;
+      renderAprendizaje();
+    };
+  }
 
-    saveDatabase();
-    renderApp();
-    closeModal("learningModal");
-    if (currentView === "detail" && activeDetailTopicId) {
-      renderTopicDetail(activeDetailTopicId);
-    }
-  });
+  // Modal Confirmación
+  document.getElementById("confirmCancelBtn")?.addEventListener("click", () => closeModal("confirmModal"));
+  document.getElementById("confirmExecuteBtn")?.addEventListener("click", executeDelete);
 
-  // 16. FORMULARIO: PERFIL ACADÉMICO
-  const openProfileModal = () => {
-    const p = appDB.profile || DEFAULT_DB.profile;
-    document.getElementById("inputStudentName").value = p.studentName || "";
-    document.getElementById("inputUniversity").value = p.university || "";
-    document.getElementById("inputCareer").value = p.career || "";
-    document.getElementById("inputProfessor").value = p.professor || "";
-    document.getElementById("inputSemester").value = p.semester || "";
-    document.getElementById("inputObjectives").value = p.objectives || "";
-    document.getElementById("inputPresentation").value = p.presentation || "";
+  // Perfil de estudiante
+  const openProfile = () => {
+    document.getElementById("profileName").value = appDB.profile.name || "";
+    document.getElementById("profileCareer").value = appDB.profile.career || "";
+    document.getElementById("profileUniversity").value = appDB.profile.university || "";
+    document.getElementById("profileTerm").value = appDB.profile.term || "";
+    document.getElementById("profileBio").value = appDB.profile.bio || "";
+    document.getElementById("profileGoals").value = appDB.profile.goals || "";
     openModal("profileModal");
   };
 
-  document.getElementById("editProfileBtn")?.addEventListener("click", openProfileModal);
-  document.getElementById("sidebarEditProfileBtn")?.addEventListener("click", openProfileModal);
-  document.getElementById("topbarProfileBtn")?.addEventListener("click", openProfileModal);
+  document.getElementById("sidebarEditProfileBtn")?.addEventListener("click", openProfile);
+  document.getElementById("topbarProfileBtn")?.addEventListener("click", openProfile);
 
   document.getElementById("profileForm")?.addEventListener("submit", (e) => {
     e.preventDefault();
-    const nameVal = document.getElementById("inputStudentName").value.trim();
-    if (!nameVal) {
-      showToast("Ingresa el nombre del estudiante.", "warning");
-      document.getElementById("inputStudentName").focus();
-      return;
-    }
-
-    appDB.profile = {
-      studentName: nameVal,
-      university: document.getElementById("inputUniversity").value.trim(),
-      career: document.getElementById("inputCareer").value.trim(),
-      professor: document.getElementById("inputProfessor").value.trim(),
-      semester: document.getElementById("inputSemester").value.trim(),
-      objectives: document.getElementById("inputObjectives").value.trim(),
-      presentation: document.getElementById("inputPresentation").value.trim()
-    };
-
+    appDB.profile.name = document.getElementById("profileName").value;
+    appDB.profile.career = document.getElementById("profileCareer").value;
+    appDB.profile.university = document.getElementById("profileUniversity").value;
+    appDB.profile.term = document.getElementById("profileTerm").value;
+    appDB.profile.bio = document.getElementById("profileBio").value;
+    appDB.profile.goals = document.getElementById("profileGoals").value;
     saveDatabase();
     updateProfileUI();
     closeModal("profileModal");
-    showToast("Datos académicos guardados exitosamente.", "success");
+    showToast("✓ Perfil actualizado con éxito.", "success");
   });
 
-  // 17. Confirmación y cierre de modales
-  document.getElementById("confirmModalAcceptBtn")?.addEventListener("click", () => {
-    if (currentConfirmAction) currentConfirmAction();
-    closeConfirmDialog();
-  });
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      document.querySelectorAll(".modal.active").forEach(m => m.classList.remove("active"));
-      closeMobileMenu();
-    }
-  });
-
-  // 18. Exportar e importar respaldos JSON
+  // Respaldo JSON
   document.getElementById("sidebarExportBtn")?.addEventListener("click", exportBackupJSON);
   document.getElementById("exportBackupFullBtn")?.addEventListener("click", exportBackupJSON);
 
-  const handleImportFile = (e) => {
+  const handleImport = (e) => {
     if (e.target.files && e.target.files[0]) {
       importBackupJSON(e.target.files[0]);
       e.target.value = "";
     }
   };
-  document.getElementById("sidebarImportFile")?.addEventListener("change", handleImportFile);
-  document.getElementById("importBackupFullFile")?.addEventListener("change", handleImportFile);
+  document.getElementById("sidebarImportFile")?.addEventListener("change", handleImport);
+  document.getElementById("importBackupFullFile")?.addEventListener("change", handleImport);
 
   document.getElementById("restoreDefaultsBtn")?.addEventListener("click", restoreDefaultData);
   document.getElementById("clearAllDataBtn")?.addEventListener("click", clearAllData);
 
-  // 19. Arranque inicial
+  // Renderizar la app completa
   renderApp();
-  console.log("Portafolio Digital de Física I v3.0 inicializado con éxito.");
 });
