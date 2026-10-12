@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Portafolio Digital interactivo y académico de Física I. Organización de temas, definiciones, fórmulas matemáticas con KaTeX, prácticas de laboratorio, talleres evaluativos, parciales corregidos y metacognición.">
+  <title>Portafolio Digital de Física I | Plataforma Académica</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>Φ</text></svg>">
+
+  <!-- Google Fonts: Inter, Outfit y Fira Code -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- KaTeX para renderizado de fórmulas matemáticas -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
+
+  <!-- Hoja de estilos principal -->
+  <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+
+  <!-- Overlay para menú móvil -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+  <!-- Barra lateral de navegación (Sidebar) -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="brand-logo">
+        <span class="brand-icon">Φ</span>
+        <div class="brand-text">
+          <span class="brand-title">Física I</span>
+          <span class="brand-subtitle">Portafolio Digital</span>
+        </div>
+      </div>
+      <button class="sidebar-close-btn" id="sidebarCloseBtn" aria-label="Cerrar menú">✕</button>
+    </div>
+
+    <!-- Perfil del estudiante en Sidebar -->
+    <div class="sidebar-profile" id="sidebarProfileCard">
+      <div class="student-avatar" id="sidebarAvatar">AM</div>
+      <div class="student-info">
+        <strong class="student-name" id="sidebarStudentName">Estudiante</strong>
+        <span class="student-meta" id="sidebarStudentMeta">Física I</span>
+      </div>
+      <button class="btn-icon-subtle" id="sidebarEditProfileBtn" title="Editar datos académicos">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+      </button>
+    </div>
+
+    <!-- Navegación principal dividida según los 6 apartados solicitados -->
+    <nav class="sidebar-nav">
+      <!-- 1. Inicio -->
+      <button class="nav-item active" data-view="inicio" id="navInicio">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+        <span>1. Inicio</span>
+      </button>
+
+      <!-- 2. Mis temas -->
+      <button class="nav-item" data-view="temas" id="navTemas">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+        <span>2. Mis temas</span>
+        <span class="nav-badge" id="navTopicsCount">0</span>
+      </button>
+
+      <!-- 3. Prácticas -->
+      <button class="nav-item" data-view="practicas" id="navPracticas">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2v7.31L4.14 20.25A2 2 0 0 0 5.86 23h12.28a2 2 0 0 0 1.72-2.75L14 9.31V2"></path><line x1="8.5" y1="2" x2="15.5" y2="2"></line><line x1="7" y1="14" x2="17" y2="14"></line></svg>
+        <span>3. Prácticas</span>
+        <span class="nav-badge" id="navPracticesCount">0</span>
+      </button>
+
+      <!-- 4. Talleres -->
+      <button class="nav-item" data-view="talleres" id="navTalleres">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        <span>4. Talleres</span>
+        <span class="nav-badge" id="navWorkshopsCount">0</span>
+      </button>
+
+      <!-- 5. Parciales -->
+      <button class="nav-item" data-view="parciales" id="navParciales">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline><path d="M16 8l4-4"></path><path d="M8 16l-4 4"></path></svg>
+        <span>5. Parciales</span>
+        <span class="nav-badge" id="navExamsCount">0</span>
+      </button>
+
+      <!-- 6. Mi aprendizaje -->
+      <button class="nav-item" data-view="aprendizaje" id="navAprendizaje">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+        <span>6. Mi aprendizaje</span>
+        <span class="nav-badge" id="navLearningsCount">0</span>
+      </button>
+
+      <!-- Sección de Respaldo y Datos -->
+      <button class="nav-item" data-view="respaldo" id="navRespaldo">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        <span>Respaldo y datos</span>
+      </button>
+    </nav>
+
+    <!-- Indicador de almacenamiento LocalStorage -->
+    <div class="sidebar-storage">
+      <div class="storage-info">
+        <span class="storage-label">Almacenamiento Local</span>
+        <span class="storage-value" id="storageUsedText">0 KB / 5 MB</span>
+      </div>
+      <div class="storage-bar">
+        <div class="storage-fill" id="storageUsedBar" style="width: 2%;"></div>
+      </div>
+      <span class="storage-hint">Guardado seguro en este navegador</span>
+    </div>
+
+    <!-- Pie de barra lateral con accesos de respaldo -->
+    <div class="sidebar-footer">
+      <button class="btn btn-secondary btn-full btn-sm" id="sidebarExportBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        Exportar JSON
+      </button>
+      <label class="btn btn-outline btn-full btn-sm file-input-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        Importar JSON
+        <input type="file" id="sidebarImportFile" accept=".json,application/json">
+      </label>
+    </div>
+  </aside>
+
+  <!-- Contenedor Principal (Main Content) -->
+  <div class="main-wrapper">
+    <!-- Topbar superior -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-toggle-btn" id="mobileMenuBtn" aria-label="Abrir navegación lateral">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+        <div class="topbar-title-group">
+          <span class="topbar-tag" id="topbarTag">SEMESTRE ACADÉMICO</span>
+          <h1 class="topbar-title" id="pageTitle">Inicio</h1>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-outline btn-sm" id="topbarProfileBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          <span class="hide-mobile">Datos del estudiante</span>
+        </button>
+        <button class="btn btn-primary btn-sm" id="topbarQuickAddBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <span>＋ Crear Nuevo Tema</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Contenido dinámico por Vistas -->
+    <main class="content-container">
+
+      <!-- ========================================== -->
+      <!-- VISTA 1: INICIO (DASHBOARD)               -->
+      <!-- ========================================== -->
+      <section class="view active" id="view-inicio">
+        <!-- Hero Banner Principal -->
+        <div class="hero-banner">
+          <div class="hero-content">
+            <span class="hero-badge">PORTAFOLIO DIGITAL DE FÍSICA I</span>
+            <h2 class="hero-title">Aprender física mediante la <span class="text-accent">comprensión</span> y la evidencia.</h2>
+            <p class="hero-description">
+              Plataforma académica interactiva para organizar contenidos teóricos, fórmulas y modelos, prácticas de laboratorio, talleres y resolución reflexiva de parciales con metacognición.
+            </p>
+            <div class="hero-actions">
+              <button class="btn btn-accent" id="heroExploreTopicsBtn">Explorar mis temas →</button>
+              <button class="btn btn-ghost-white" id="heroCreateTopicBtn">＋ Registrar nuevo tema</button>
+            </div>
+          </div>
+          <!-- Gráfico visual temático de Física -->
+          <div class="hero-illustration" aria-hidden="true">
+            <div class="physics-orbital">
+              <div class="orbital-ring ring-1"></div>
+              <div class="orbital-ring ring-2"></div>
+              <div class="orbital-core">
+                <span>m·a</span>
+              </div>
+              <div class="floating-chip chip-1">v = Δx / Δt</div>
+              <div class="floating-chip chip-2">ΣF = m·a</div>
+              <div class="floating-chip chip-3">E = K + U</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ficha Académica del Estudiante -->
+        <div class="academic-profile-card">
+          <div class="profile-card-header">
+            <div class="profile-header-title">
+              <span class="icon-bubble">🎓</span>
+              <div>
+                <h3>Ficha del Estudiante y Contexto Académico</h3>
+                <p>Datos institucionales de la asignatura Física I</p>
+              </div>
+            </div>
+            <button class="btn btn-outline btn-sm" id="editProfileBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+              Editar datos
+            </button>
+          </div>
+          <div class="profile-details-grid">
+            <div class="profile-item">
+              <span class="profile-item-label">Estudiante</span>
+              <strong class="profile-item-value" id="profileStudentName">Nombre del Estudiante</strong>
+            </div>
+            <div class="profile-item">
+              <span class="profile-item-label">Carrera / Programa</span>
+              <strong class="profile-item-value" id="profileCareer">Ingeniería</strong>
+            </div>
+            <div class="profile-item">
+              <span class="profile-item-label">Universidad / Institución</span>
+              <strong class="profile-item-value" id="profileUniversity">Universidad Nacional</strong>
+            </div>
+            <div class="profile-item">
+              <span class="profile-item-label">Docente</span>
+              <strong class="profile-item-value" id="profileProfessor">Docente de la Cátedra</strong>
+            </div>
+            <div class="profile-item">
+              <span class="profile-item-label">Semestre Académico</span>
+              <strong class="profile-item-value" id="profileSemester">2026-I</strong>
+            </div>
+          </div>
+
+          <!-- Presentación y Objetivos del Portafolio -->
+          <div class="profile-text-blocks">
+            <div class="text-block">
+              <h4>🎯 Objetivos del Portafolio</h4>
+              <p id="profileObjectives">
+                Demostrar la asimilación conceptual de la mecánica clásica newtoniana, el rigor en la resolución analítica de problemas, la destreza experimental en laboratorios y la capacidad metacognitiva para analizar y corregir errores en evaluaciones.
+              </p>
+            </div>
+            <div class="text-block">
+              <h4>📖 Presentación General</h4>
+              <p id="profilePresentation">
+                Este portafolio digital organiza de forma continua y verificable todas las evidencias de aprendizaje generadas a lo largo del curso de Física I, constituyendo una memoria reflexiva del proceso académico.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Métricas KPI e Indicador General de Progreso -->
+        <div class="stats-overview stats-overview-6">
+          <div class="stat-card" data-goto-view="temas">
+            <div class="stat-icon-wrapper blue">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            </div>
+            <div class="stat-data">
+              <span class="stat-number" id="kpiTopicsCount">0</span>
+              <span class="stat-title">Temas Teóricos</span>
+              <span class="stat-sub">Registrados en el curso</span>
+            </div>
+          </div>
+
+          <div class="stat-card" data-goto-view="practicas">
+            <div class="stat-icon-wrapper cyan">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2v7.31L4.14 20.25A2 2 0 0 0 5.86 23h12.28a2 2 0 0 0 1.72-2.75L14 9.31V2"></path><line x1="8.5" y1="2" x2="15.5" y2="2"></line></svg>
+            </div>
+            <div class="stat-data">
+              <span class="stat-number" id="kpiPracticesCount">0</span>
+              <span class="stat-title">Prácticas de Lab.</span>
+              <span class="stat-sub">Datos y experiencias</span>
+            </div>
+          </div>
+
+          <div class="stat-card" data-goto-view="talleres">
+            <div class="stat-icon-wrapper orange">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line></svg>
+            </div>
+            <div class="stat-data">
+              <span class="stat-number" id="kpiWorkshopsCount">0</span>
+              <span class="stat-title">Talleres Resueltos</span>
+              <span class="stat-sub">Ejercicios y desarrollos</span>
+            </div>
+          </div>
+
+          <div class="stat-card" data-goto-view="parciales">
+            <div class="stat-icon-wrapper purple">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+            </div>
+            <div class="stat-data">
+              <span class="stat-number" id="kpiExamsCount">0</span>
+              <span class="stat-title">Parciales y Errores</span>
+              <span class="stat-sub">Correcciones analíticas</span>
+            </div>
+          </div>
+
+          <div class="stat-card" data-goto-view="aprendizaje">
+            <div class="stat-icon-wrapper green">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+            </div>
+            <div class="stat-data">
+              <span class="stat-number" id="kpiLearningsCount">0</span>
+              <span class="stat-title">Metacognición</span>
+              <span class="stat-sub">Dificultades superadas</span>
+            </div>
+          </div>
+
+          <div class="stat-card progress-kpi-card">
+            <div class="stat-icon-wrapper navy">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+            </div>
+            <div class="stat-data">
+              <div class="stat-progress-header">
+                <span class="stat-number" id="kpiGlobalProgress">0%</span>
+                <span class="stat-progress-badge">Avance General</span>
+              </div>
+              <div class="global-progress-bar">
+                <div class="global-progress-fill" id="kpiGlobalProgressBar" style="width: 0%;"></div>
+              </div>
+              <span class="stat-sub">Completitud promedio del curso</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Acceso Rápido a Temas Recientes -->
+        <div class="section-block">
+          <div class="section-block-header">
+            <div>
+              <span class="section-tag">ACCESO RÁPIDO</span>
+              <h3 class="section-title">Temas Recientes del Semestre</h3>
+            </div>
+            <button class="btn btn-link" id="homeViewAllTopicsBtn">Ver todos los temas →</button>
+          </div>
+          <div class="topics-grid" id="homeRecentTopicsGrid">
+            <!-- Cargado dinámicamente con JS -->
+          </div>
+        </div>
+
+        <!-- Accesos rápidos a actividades evaluativas -->
+        <div class="section-block">
+          <div class="section-block-header">
+            <div>
+              <span class="section-tag">ACTIVIDADES RECIENTES</span>
+              <h3 class="section-title">Últimas Prácticas, Talleres y Evaluaciones</h3>
+            </div>
+          </div>
+          <div class="recent-activities-grid" id="homeRecentActivitiesGrid">
+            <!-- Renderizado dinámico -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- VISTA 2: MIS TEMAS DE ESTUDIO             -->
+      <!-- ========================================== -->
+      <section class="view" id="view-temas">
+        <div class="section-block-header">
+          <div>
+            <span class="section-tag">CONTENIDO TEÓRICO</span>
+            <h2 class="section-title">Mis Temas de Física I</h2>
+            <p class="section-desc">Contenidos conceptuales, definiciones precisas, fórmulas matemáticas y modelos del curso.</p>
+          </div>
+          <button class="btn btn-primary" id="btnOpenNewTopicModal">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Agregar nuevo tema
+          </button>
+        </div>
+
+        <!-- Barra de herramientas: Búsqueda y Filtros de Estado -->
+        <div class="topics-toolbar">
+          <div class="search-field">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="search" id="searchTopicsInput" placeholder="Buscar por título o descripción del tema...">
+          </div>
+          <div class="filter-group">
+            <button class="filter-chip active" data-filter-topics="all">Todos (<span id="countTopicsAll">0</span>)</button>
+            <button class="filter-chip" data-filter-topics="Completado">Completados (<span id="countTopicsComplete">0</span>)</button>
+            <button class="filter-chip" data-filter-topics="En progreso">En progreso (<span id="countTopicsProgress">0</span>)</button>
+            <button class="filter-chip" data-filter-topics="Pendiente">Pendientes (<span id="countTopicsPending">0</span>)</button>
+          </div>
+        </div>
+
+        <!-- Cuadrícula con las tarjetas de los temas -->
+        <div class="topics-grid" id="topicsGrid">
+          <!-- Renderizado dinámico desde JS -->
+        </div>
+
+        <!-- Estado vacío cuando no hay resultados -->
+        <div class="empty-state hidden" id="topicsEmptyState">
+          <div class="empty-icon">🔍</div>
+          <h3>No se encontraron temas</h3>
+          <p>No hay temas que coincidan con la búsqueda o filtro aplicado.</p>
+          <button class="btn btn-outline btn-sm" id="emptyResetTopicFilterBtn">Restablecer filtros</button>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- VISTA 3: PRÁCTICAS DE LABORATORIO         -->
+      <!-- ========================================== -->
+      <section class="view" id="view-practicas">
+        <div class="section-block-header">
+          <div>
+            <span class="section-tag">EXPERIMENTACIÓN</span>
+            <h2 class="section-title">Prácticas de Laboratorio</h2>
+            <p class="section-desc">Experiencias experimentales, hipótesis, montaje de instrumentos, toma de datos, cálculos y conclusiones.</p>
+          </div>
+          <button class="btn btn-primary" id="btnOpenNewPracticeModal">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Registrar nueva práctica
+          </button>
+        </div>
+
+        <!-- Filtros y Búsqueda de Prácticas -->
+        <div class="topics-toolbar">
+          <div class="search-field">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="search" id="searchPracticesInput" placeholder="Buscar por título, objetivos o materiales...">
+          </div>
+          <div class="filter-select-wrapper">
+            <label for="filterPracticeTopicSelect" class="sr-only">Filtrar por tema</label>
+            <select id="filterPracticeTopicSelect" class="styled-select">
+              <option value="all">Todos los temas</option>
+              <!-- Opciones dinámicas de temas -->
+            </select>
+          </div>
+        </div>
+
+        <!-- Grid de Prácticas -->
+        <div class="cards-activity-grid" id="practicesGrid">
+          <!-- Renderizado dinámico -->
+        </div>
+
+        <div class="empty-state hidden" id="practicesEmptyState">
+          <div class="empty-icon">🧪</div>
+          <h3>No se encontraron prácticas</h3>
+          <p>No hay prácticas registradas que coincidan con los filtros seleccionados.</p>
+          <button class="btn btn-primary btn-sm" onclick="openPracticeModal()">Registrar primera práctica</button>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- VISTA 4: TALLERES                         -->
+      <!-- ========================================== -->
+      <section class="view" id="view-talleres">
+        <div class="section-block-header">
+          <div>
+            <span class="section-tag">RESOLUCIÓN DE PROBLEMAS</span>
+            <h2 class="section-title">Talleres y Ejercicios Resueltos</h2>
+            <p class="section-desc">Enunciados completos, desarrollo analítico paso a paso, fórmulas utilizadas y verificación física de resultados.</p>
+          </div>
+          <button class="btn btn-primary" id="btnOpenNewWorkshopModal">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Registrar nuevo taller
+          </button>
+        </div>
+
+        <!-- Filtros y Búsqueda de Talleres -->
+        <div class="topics-toolbar">
+          <div class="search-field">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="search" id="searchWorkshopsInput" placeholder="Buscar por título, problema o respuesta...">
+          </div>
+          <div class="filter-select-wrapper">
+            <label for="filterWorkshopTopicSelect" class="sr-only">Filtrar por tema</label>
+            <select id="filterWorkshopTopicSelect" class="styled-select">
+              <option value="all">Todos los temas</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Grid de Talleres -->
+        <div class="cards-activity-grid" id="workshopsGrid">
+          <!-- Renderizado dinámico -->
+        </div>
+
+        <div class="empty-state hidden" id="workshopsEmptyState">
+          <div class="empty-icon">📝</div>
+          <h3>No se encontraron talleres</h3>
+          <p>Aún no hay talleres registrados bajo este criterio.</p>
+          <button class="btn btn-primary btn-sm" onclick="openWorkshopModal()">Registrar primer taller</button>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- VISTA 5: PARCIALES Y CORRECCIONES         -->
+      <!-- ========================================== -->
+      <section class="view" id="view-parciales">
+        <div class="section-block-header">
+          <div>
+            <span class="section-tag">EVALUACIÓN Y APRENDIZAJE CRÍTICO</span>
+            <h2 class="section-title">Parciales y Correcciones</h2>
+            <p class="section-desc">Documentación de exámenes, errores identificados en el desarrollo original, solución correcta paso a paso y estrategias preventivas.</p>
+          </div>
+          <button class="btn btn-primary" id="btnOpenNewExamModal">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Registrar corrección de parcial
+          </button>
+        </div>
+
+        <!-- Filtros y Búsqueda de Parciales -->
+        <div class="topics-toolbar">
+          <div class="search-field">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="search" id="searchExamsInput" placeholder="Buscar por evaluación, contenidos o error cometido...">
+          </div>
+          <div class="filter-select-wrapper">
+            <label for="filterExamTopicSelect" class="sr-only">Filtrar por tema</label>
+            <select id="filterExamTopicSelect" class="styled-select">
+              <option value="all">Todos los temas</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Grid de Parciales -->
+        <div class="cards-activity-grid" id="examsGrid">
+          <!-- Renderizado dinámico -->
+        </div>
+
+        <div class="empty-state hidden" id="examsEmptyState">
+          <div class="empty-icon">🎯</div>
+          <h3>No se encontraron evaluaciones</h3>
+          <p>No hay exámenes o correcciones registradas para este filtro.</p>
+          <button class="btn btn-primary btn-sm" onclick="openExamModal()">Registrar primer parcial</button>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- VISTA 6: MI APRENDIZAJE (METACOGNICIÓN)   -->
+      <!-- ========================================== -->
+      <section class="view" id="view-aprendizaje">
+        <div class="section-block-header">
+          <div>
+            <span class="section-tag">METACOGNICIÓN</span>
+            <h2 class="section-title">Mi Aprendizaje y Situaciones de Dificultad</h2>
+            <p class="section-desc">Bitácora reflexiva sobre los obstáculos conceptuales superados, estrategias de estudio efectivas y verificación objetiva del progreso.</p>
+          </div>
+          <button class="btn btn-primary" id="btnOpenNewLearningModal">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Registrar nueva reflexión
+          </button>
+        </div>
+
+        <!-- Filtros y Búsqueda -->
+        <div class="topics-toolbar">
+          <div class="search-field">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="search" id="searchLearningsInput" placeholder="Buscar por dificultad, estrategia o qué aprendí...">
+          </div>
+          <div class="filter-select-wrapper">
+            <label for="filterLearningTopicSelect" class="sr-only">Filtrar por tema</label>
+            <select id="filterLearningTopicSelect" class="styled-select">
+              <option value="all">Todos los temas</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Grid de Situaciones de Aprendizaje -->
+        <div class="cards-activity-grid" id="learningsGrid">
+          <!-- Renderizado dinámico -->
+        </div>
+
+        <div class="empty-state hidden" id="learningsEmptyState">
+          <div class="empty-icon">✦</div>
+          <h3>No se encontraron situaciones de aprendizaje</h3>
+          <p>Registra las dificultades que enfrentaste en algún tema y la estrategia que te permitió superarlas.</p>
+          <button class="btn btn-primary btn-sm" onclick="openLearningModal()">Registrar primera situación</button>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- VISTA 7: DETALLE DEL TEMA                 -->
+      <!-- ========================================== -->
+      <section class="view" id="view-detail">
+        <!-- Navegación de regreso y botones de acción del tema -->
+        <div class="detail-navigation-bar">
+          <button class="btn btn-ghost" id="detailBackBtn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            Volver a mis temas
+          </button>
+          <div class="detail-top-actions">
+            <button class="btn btn-outline btn-sm" id="detailEditTopicBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+              Editar información del tema
+            </button>
+            <button class="btn btn-danger-outline btn-sm" id="detailDeleteTopicBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              Eliminar tema
+            </button>
+          </div>
+        </div>
+
+        <!-- Contenedor del contenido detallado -->
+        <div id="topicDetailContainer">
+          <!-- Renderizado dinámico desde JS -->
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- VISTA 8: RESPALDO Y GESTIÓN DE DATOS      -->
+      <!-- ========================================== -->
+      <section class="view" id="view-respaldo">
+        <div class="section-block-header">
+          <div>
+            <span class="section-tag">GESTIÓN Y SEGURIDAD</span>
+            <h2 class="section-title">Copias de Seguridad y Administración de Datos</h2>
+            <p class="section-desc">Exporta e importa tus contenidos en formato JSON para no perder tu trabajo y respaldar tu semestre.</p>
+          </div>
+        </div>
+
+        <div class="backup-grid">
+          <!-- Tarjeta: Exportar -->
+          <div class="backup-card">
+            <div class="backup-card-icon blue">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            </div>
+            <h3>Exportar Respaldo Completo</h3>
+            <p>Descarga un archivo JSON estructurado con todos tus temas, definiciones, fórmulas, prácticas, talleres, parciales y reflexiones.</p>
+            <ul class="backup-perks">
+              <li>✓ Incluye perfil de estudiante y metas</li>
+              <li>✓ Estructura independiente v3 compatible</li>
+              <li>✓ Compatible con cualquier navegador</li>
+            </ul>
+            <button class="btn btn-primary btn-full" id="exportBackupFullBtn">
+              Descargar archivo JSON de respaldo
+            </button>
+          </div>
+
+          <!-- Tarjeta: Importar -->
+          <div class="backup-card">
+            <div class="backup-card-icon orange">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            </div>
+            <h3>Importar Copia de Seguridad</h3>
+            <p>Carga un archivo de respaldo previamente exportado. El sistema migrará e incorporará toda la información de forma segura.</p>
+            <div class="alert-box alert-warning">
+              <strong>Nota importante:</strong> Al importar, se te pedirá confirmación previa antes de reemplazar los datos actuales.
+            </div>
+            <label class="btn btn-accent btn-full file-input-label">
+              Seleccionar archivo JSON
+              <input type="file" id="importBackupFullFile" accept=".json,application/json">
+            </label>
+          </div>
+
+          <!-- Tarjeta: Memoria LocalStorage -->
+          <div class="backup-card">
+            <div class="backup-card-icon green">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+            </div>
+            <h3>Estado del Almacenamiento</h3>
+            <p>Monitoreo del uso de memoria local en el navegador actual.</p>
+            <div class="storage-metric-box">
+              <div class="storage-metric-row">
+                <span>Espacio ocupado estimado:</span>
+                <strong id="storageDetailUsed">0 KB</strong>
+              </div>
+              <div class="storage-metric-row">
+                <span>Límite aproximado del navegador:</span>
+                <strong>5,000 KB (5 MB)</strong>
+              </div>
+              <div class="storage-bar large-bar">
+                <div class="storage-fill" id="storageDetailBar" style="width: 2%;"></div>
+              </div>
+            </div>
+            <p class="backup-hint">
+              LocalStorage almacena los datos de forma privada en este equipo. Usa la exportación JSON para transferir tus datos a otro dispositivo.
+            </p>
+          </div>
+
+          <!-- Tarjeta: Restaurar y Mantenimiento -->
+          <div class="backup-card">
+            <div class="backup-card-icon red">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 2v6h6"></path><path d="M21 12A9 9 0 0 0 6 5.3L3 8"></path><path d="M21 22v-6h-6"></path><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"></path></svg>
+            </div>
+            <h3>Opciones de Restauración</h3>
+            <p>Si deseas restaurar los contenidos de ejemplo académico (Vectores, Cinemática y Leyes de Newton con sus prácticas y evaluaciones):</p>
+            <div class="danger-actions-row">
+              <button class="btn btn-outline btn-full" id="restoreDefaultsBtn">
+                Restaurar datos modelo de ejemplo
+              </button>
+              <button class="btn btn-danger-outline btn-full" id="clearAllDataBtn">
+                Borrar todos los registros almacenados
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer global -->
+    <footer class="global-footer">
+      <div class="footer-left">
+        <strong>Portafolio Digital de Física I</strong>
+        <span>Semestre Académico — Plataforma Integral de Evidencias, Actividades y Metacognición</span>
+      </div>
+      <div class="footer-right">
+        <span>HTML5 · CSS3 · Vanilla JS · LocalStorage · KaTeX</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- MODALES ESPECIALIZADOS CON DESPLAZAMIENTO VERTICAL GARANTIZADO        -->
+  <!-- ====================================================================== -->
+
+  <!-- 1. MODAL: EDITAR / CREAR TEMA -->
+  <div class="modal" id="topicModal" role="dialog" aria-modal="true" aria-labelledby="topicModalTitle">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-title">
+            <span class="step-badge">▤</span>
+            <h3 id="topicModalTitle">Registrar Tema Académico</h3>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal('topicModal')" aria-label="Cerrar">✕</button>
+        </div>
+        <form id="topicForm" class="modal-form" novalidate>
+          <input type="hidden" id="topicFormId">
+          <div class="modal-body">
+            <div class="form-row form-row-3">
+              <div class="form-group span-2">
+                <label for="topicFormTitle">Título del tema <span class="required">*</span></label>
+                <input type="text" id="topicFormTitle" required placeholder="Ej. Dinámica de Rotación y Momento de Inercia">
+              </div>
+              <div class="form-group">
+                <label for="topicFormOrder">Número u orden</label>
+                <input type="number" id="topicFormOrder" min="1" max="99" value="1">
+              </div>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="topicFormStatus">Estado de avance</label>
+                <select id="topicFormStatus">
+                  <option value="Pendiente">Pendiente (Sin iniciar)</option>
+                  <option value="En progreso">En progreso (En desarrollo)</option>
+                  <option value="Completado">Completado (Todas las evidencias listas)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="topicFormHours">Horas dedicadas estimadas</label>
+                <input type="text" id="topicFormHours" placeholder="Ej. 18 horas">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="topicFormDesc">Descripción breve / Resumen <span class="required">*</span></label>
+              <textarea id="topicFormDesc" rows="3" required placeholder="Describe los fundamentos y alcance de este tema..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="topicFormConceptual">Esquema conceptual y relaciones generales</label>
+              <textarea id="topicFormConceptual" rows="4" placeholder="Explica la visión global del tema, su relación con las leyes de conservación y principios físicos..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Mapa Conceptual o Esquema Gráfico (Imagen o Documento PDF)</label>
+              <div class="file-uploader-box">
+                <input type="file" id="topicFormMapFile" accept="image/*,.pdf" class="file-hidden-input">
+                <div class="uploader-prompt">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  <span>Haz clic aquí para seleccionar imagen o PDF del mapa conceptual</span>
+                  <small>Archivos menores a 1.5 MB recomendados para LocalStorage</small>
+                </div>
+              </div>
+              <div id="topicMapFilePreview" class="attached-items-list"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeModal('topicModal')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitTopicForm">Guardar Tema</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. MODAL: AGREGAR / EDITAR DEFINICIÓN INDIVIDUAL -->
+  <div class="modal" id="definitionModal" role="dialog" aria-modal="true" aria-labelledby="defModalTitle">
+    <div class="modal-dialog modal-dialog-md">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-title">
+            <span class="step-badge">📖</span>
+            <h3 id="defModalTitle">Definición de Concepto</h3>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal('definitionModal')" aria-label="Cerrar">✕</button>
+        </div>
+        <form id="definitionForm" class="modal-form" novalidate>
+          <input type="hidden" id="defFormId">
+          <input type="hidden" id="defFormTopicId">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="defFormTopicSelect">Tema relacionado <span class="required">*</span></label>
+              <select id="defFormTopicSelect" required>
+                <!-- Opciones dinámicas -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="defFormTerm">Término o Concepto <span class="required">*</span></label>
+              <input type="text" id="defFormTerm" required placeholder="Ej. Aceleración Centrípeta">
+            </div>
+            <div class="form-group">
+              <label for="defFormDefinition">Definición Académica Rigurosa <span class="required">*</span></label>
+              <textarea id="defFormDefinition" rows="4" required placeholder="Explica con claridad y precisión el significado físico del concepto..."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeModal('definitionModal')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitDefForm">Guardar Definición</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. MODAL: AGREGAR / EDITAR FÓRMULA INDIVIDUAL (CON KATEX EN VIVO) -->
+  <div class="modal" id="formulaModal" role="dialog" aria-modal="true" aria-labelledby="formulaModalTitle">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-title">
+            <span class="step-badge">𝚺</span>
+            <h3 id="formulaModalTitle">Fórmula y Modelo Matemático</h3>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal('formulaModal')" aria-label="Cerrar">✕</button>
+        </div>
+        <form id="formulaForm" class="modal-form" novalidate>
+          <input type="hidden" id="formulaFormId">
+          <input type="hidden" id="formulaFormTopicId">
+          <div class="modal-body">
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="formulaFormTopicSelect">Tema relacionado <span class="required">*</span></label>
+                <select id="formulaFormTopicSelect" required>
+                  <!-- Dinámico -->
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="formulaFormName">Nombre de la Ecuación / Ley <span class="required">*</span></label>
+                <input type="text" id="formulaFormName" required placeholder="Ej. Ecuación de Torricelli">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="formulaFormLatex">Código LaTeX de la Fórmula <span class="required">*</span></label>
+              <input type="text" id="formulaFormLatex" required placeholder="Ej. v_f^2 = v_0^2 + 2 a \Delta x">
+              <span class="form-hint">Escribe la ecuación matemática en formato LaTeX estándar.</span>
+            </div>
+
+            <div class="form-group">
+              <label>Vista Previa KaTeX en Tiempo Real:</label>
+              <div class="katex-live-box" id="formulaFormKatexPreview">
+                <span class="text-muted">Escribe código LaTeX arriba para previsualizar aquí.</span>
+              </div>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="formulaFormVars">Significado de Variables y Unidades (SI)</label>
+                <textarea id="formulaFormVars" rows="3" placeholder="vf: velocidad final [m/s], v0: velocidad inicial [m/s], a: aceleración [m/s²], Δx: desplazamiento [m]"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="formulaFormConditions">Condiciones de Aplicación y Validez</label>
+                <textarea id="formulaFormConditions" rows="3" placeholder="Aceleración constante en todo el intervalo analizado."></textarea>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="formulaFormExample">Ejemplo de Cálculo Numérico Resuelto</label>
+              <textarea id="formulaFormExample" rows="3" placeholder="Si v0 = 10 m/s, a = 2 m/s² y Δx = 24 m ⇒ vf² = 100 + 2(2)(24) = 196 ⇒ vf = 14 m/s."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeModal('formulaModal')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitFormulaForm">Guardar Fórmula</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. MODAL: AGREGAR / EDITAR PRÁCTICA INDIVIDUAL -->
+  <div class="modal" id="practiceModal" role="dialog" aria-modal="true" aria-labelledby="practiceModalTitle">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-title">
+            <span class="step-badge">🧪</span>
+            <h3 id="practiceModalTitle">Práctica de Laboratorio</h3>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal('practiceModal')" aria-label="Cerrar">✕</button>
+        </div>
+        <form id="practiceForm" class="modal-form" novalidate>
+          <input type="hidden" id="practiceFormId">
+          <div class="modal-body">
+            <div class="form-row form-row-3">
+              <div class="form-group span-2">
+                <label for="practiceFormTitle">Título de la Práctica <span class="required">*</span></label>
+                <input type="text" id="practiceFormTitle" required placeholder="Ej. Práctica 2: Caída Libre con Sensores Ópticos">
+              </div>
+              <div class="form-group">
+                <label for="practiceFormDate">Fecha de Realización</label>
+                <input type="date" id="practiceFormDate">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="practiceFormTopicSelect">Tema Relacionado</label>
+              <select id="practiceFormTopicSelect">
+                <option value="">(Sin vincular a un tema específico)</option>
+                <!-- Dinámico -->
+              </select>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="practiceFormStatement">Enunciado / Pregunta Experimental</label>
+                <textarea id="practiceFormStatement" rows="3" placeholder="¿Cómo varía la rapidez de un móvil en función del tiempo?"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="practiceFormObjectives">Objetivos de la Práctica <span class="required">*</span></label>
+                <textarea id="practiceFormObjectives" rows="3" required placeholder="• Determinar el valor experimental de la aceleración g..."></textarea>
+              </div>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="practiceFormMaterials">Materiales e Instrumentos Empleados</label>
+                <textarea id="practiceFormMaterials" rows="3" placeholder="Riel de aire, fotopuertas Pasco, compresor, masa de tracción..."></textarea>
+              </div>
+              <div class="form-group">
+                <label for="practiceFormData">Datos y Mediciones Registradas</label>
+                <textarea id="practiceFormData" rows="3" placeholder="Tabla de alturas y tiempos medidos en milisegundos..."></textarea>
+              </div>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="practiceFormProcedure">Procedimiento Experimental</label>
+                <textarea id="practiceFormProcedure" rows="3" placeholder="1. Calibrar sensores. 2. Nivelar la pista. 3. Soltar el móvil..."></textarea>
+              </div>
+              <div class="form-group">
+                <label for="practiceFormCalculations">Cálculos, Fórmulas y Análisis</label>
+                <textarea id="practiceFormCalculations" rows="3" placeholder="Regresión lineal h vs t², cálculo de pendiente m = ½ g..."></textarea>
+              </div>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="practiceFormResults">Resultados Obtenidos</label>
+                <textarea id="practiceFormResults" rows="2" placeholder="g = (9.78 ± 0.04) m/s² con error porcentual de 0.27%..."></textarea>
+              </div>
+              <div class="form-group">
+                <label for="practiceFormConclusions">Conclusiones</label>
+                <textarea id="practiceFormConclusions" rows="2" placeholder="Se comprobó el modelo MRUV para la caída libre en el vacío..."></textarea>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Evidencias Adjuntas (Fotografías del montaje / Informe PDF)</label>
+              <div class="file-uploader-box">
+                <input type="file" id="practiceFormFiles" multiple accept="image/*,.pdf" class="file-hidden-input">
+                <div class="uploader-prompt">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  <span>Haz clic aquí para adjuntar fotos o documentos</span>
+                </div>
+              </div>
+              <div id="practiceFormFilesPreview" class="attached-items-list"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeModal('practiceModal')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitPracticeForm">Guardar Práctica</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. MODAL: AGREGAR / EDITAR TALLER INDIVIDUAL -->
+  <div class="modal" id="workshopModal" role="dialog" aria-modal="true" aria-labelledby="workshopModalTitle">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-title">
+            <span class="step-badge">📝</span>
+            <h3 id="workshopModalTitle">Taller y Ejercicios Resueltos</h3>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal('workshopModal')" aria-label="Cerrar">✕</button>
+        </div>
+        <form id="workshopForm" class="modal-form" novalidate>
+          <input type="hidden" id="workshopFormId">
+          <div class="modal-body">
+            <div class="form-row form-row-3">
+              <div class="form-group span-2">
+                <label for="workshopFormTitle">Título del Taller / Identificación <span class="required">*</span></label>
+                <input type="text" id="workshopFormTitle" required placeholder="Ej. Taller 3 - Ejercicio 5: Máquina de Atwood">
+              </div>
+              <div class="form-group">
+                <label for="workshopFormDate">Fecha</label>
+                <input type="date" id="workshopFormDate">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="workshopFormTopicSelect">Tema Relacionado</label>
+              <select id="workshopFormTopicSelect">
+                <option value="">(Sin vincular a un tema específico)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="workshopFormStatement">Enunciado Completo del Problema o Instrucciones <span class="required">*</span></label>
+              <textarea id="workshopFormStatement" rows="3" required placeholder="Copia el enunciado asignado con todos sus datos numéricos..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="workshopFormFormulas">Fórmulas y Modelos Utilizados (LaTeX o texto)</label>
+              <input type="text" id="workshopFormFormulas" placeholder="Ej. \sum F = m a, \quad f_k = \mu_k N">
+            </div>
+
+            <div class="form-group">
+              <label for="workshopFormStepByStep">Procedimiento y Desarrollo Paso a Paso <span class="required">*</span></label>
+              <textarea id="workshopFormStepByStep" rows="5" required placeholder="1. Diagrama de cuerpo libre...&#10;2. Ecuaciones por componentes...&#10;3. Despeje algebraico..."></textarea>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="workshopFormAnswer">Respuestas y Resultados Finales (con unidades) <span class="required">*</span></label>
+                <input type="text" id="workshopFormAnswer" required placeholder="Ej. a = 2.45 m/s², T = 36.75 N">
+              </div>
+              <div class="form-group">
+                <label for="workshopFormVerification">Verificación o Comprobación Física</label>
+                <input type="text" id="workshopFormVerification" placeholder="Ej. Coincide analizando balance de energía mecánica">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="workshopFormReflection">Reflexión sobre lo Aprendido en este Taller</label>
+              <textarea id="workshopFormReflection" rows="2" placeholder="¿Qué habilidad o truco analítico aprendiste resolviendo este ejercicio?"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Imágenes o Documentos Adjuntos (Hojas de trabajo / Gráficos)</label>
+              <div class="file-uploader-box">
+                <input type="file" id="workshopFormFiles" multiple accept="image/*,.pdf" class="file-hidden-input">
+                <div class="uploader-prompt">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  <span>Haz clic para adjuntar hojas de desarrollo resuelto</span>
+                </div>
+              </div>
+              <div id="workshopFormFilesPreview" class="attached-items-list"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeModal('workshopModal')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitWorkshopForm">Guardar Taller</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. MODAL: AGREGAR / EDITAR PARCIAL INDIVIDUAL -->
+  <div class="modal" id="examModal" role="dialog" aria-modal="true" aria-labelledby="examModalTitle">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-title">
+            <span class="step-badge">🎯</span>
+            <h3 id="examModalTitle">Examen Parcial y Corrección</h3>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal('examModal')" aria-label="Cerrar">✕</button>
+        </div>
+        <form id="examForm" class="modal-form" novalidate>
+          <input type="hidden" id="examFormId">
+          <div class="modal-body">
+            <div class="form-row form-row-3">
+              <div class="form-group span-2">
+                <label for="examFormTitle">Nombre o Número del Parcial <span class="required">*</span></label>
+                <input type="text" id="examFormTitle" required placeholder="Ej. Primer Parcial - Problema 3">
+              </div>
+              <div class="form-group">
+                <label for="examFormDate">Fecha de Realización</label>
+                <input type="date" id="examFormDate">
+              </div>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="examFormTopicSelect">Tema Relacionado</label>
+                <select id="examFormTopicSelect">
+                  <option value="">(Sin vincular a un tema específico)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="examFormContents">Contenidos Evaluados</label>
+                <input type="text" id="examFormContents" placeholder="Ej. Cinemática 2D, tiro parabólico con desnivel">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="examFormStatement">Enunciado o Pregunta Evaluada <span class="required">*</span></label>
+              <textarea id="examFormStatement" rows="3" required placeholder="Enunciado exacto de la pregunta o ejercicio del examen..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="examFormOriginal">Procedimiento Realizado Originalmente (en la prueba) <span class="required">*</span></label>
+              <textarea id="examFormOriginal" rows="3" required placeholder="Describe lo que hiciste en la hoja del examen y por qué resultó incorrecto..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="examFormError">Error Identificado y su Corrección (Diagnóstico Pedagógico) <span class="required">*</span></label>
+              <textarea id="examFormError" rows="3" required placeholder="¿Cuál fue la falla conceptual o de procedimiento? (ej. Usar fórmula de alcance plano sin considerar la altura del acantilado)..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="examFormCorrectSolution">Solución Correcta Paso a Paso <span class="required">*</span></label>
+              <textarea id="examFormCorrectSolution" rows="4" required placeholder="Desarrollo analítico correcto con ecuaciones completas..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="examFormVerification">Verificación del Resultado</label>
+              <input type="text" id="examFormVerification" placeholder="Ej. Comprobación por conservación de la energía mecánica">
+            </div>
+
+            <div class="form-group">
+              <label for="examFormReflection">Reflexión: ¿Cómo evitar el error y qué temas necesito reforzar? <span class="required">*</span></label>
+              <textarea id="examFormReflection" rows="3" required placeholder="Estrategia clara para no repetir este error en futuras evaluaciones..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Imágenes o Documentos Adjuntos (Foto del examen calificado / Scan)</label>
+              <div class="file-uploader-box">
+                <input type="file" id="examFormFiles" multiple accept="image/*,.pdf" class="file-hidden-input">
+                <div class="uploader-prompt">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  <span>Haz clic para adjuntar fotografía o scan del examen</span>
+                </div>
+              </div>
+              <div id="examFormFilesPreview" class="attached-items-list"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeModal('examModal')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitExamForm">Guardar Parcial</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. MODAL: AGREGAR / EDITAR SITUACIÓN DE APRENDIZAJE -->
+  <div class="modal" id="learningModal" role="dialog" aria-modal="true" aria-labelledby="learningModalTitle">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-title">
+            <span class="step-badge">✦</span>
+            <h3 id="learningModalTitle">Situación de Aprendizaje y Metacognición</h3>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal('learningModal')" aria-label="Cerrar">✕</button>
+        </div>
+        <form id="learningForm" class="modal-form" novalidate>
+          <input type="hidden" id="learningFormId">
+          <div class="modal-body">
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="learningFormTitle">Título de la Dificultad o Situación <span class="required">*</span></label>
+                <input type="text" id="learningFormTitle" required placeholder="Ej. Determinación de cuadrantes en vectores">
+              </div>
+              <div class="form-group">
+                <label for="learningFormTopicSelect">Tema Relacionado</label>
+                <select id="learningFormTopicSelect">
+                  <option value="">(Sin vincular a un tema específico)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="learningFormDifficulty">1. ¿Qué dificultad encontré? <span class="required">*</span></label>
+              <textarea id="learningFormDifficulty" rows="2" required placeholder="Describe el obstáculo conceptual o de cálculo..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="learningFormConcept">2. ¿Qué concepto o procedimiento no comprendía? <span class="required">*</span></label>
+              <textarea id="learningFormConcept" rows="2" required placeholder="Identifica el vacío de comprensión exacto..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="learningFormStrategy">3. ¿Qué estrategia de aprendizaje utilicé? <span class="required">*</span></label>
+              <textarea id="learningFormStrategy" rows="2" required placeholder="Técnica, método de estudio o cambio de enfoque..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="learningFormResources">4. ¿Qué ejercicios o recursos me ayudaron? <span class="required">*</span></label>
+              <textarea id="learningFormResources" rows="2" required placeholder="Simuladores PhET, libros de texto, tutorías con el docente..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="learningFormWhatLearned">5. ¿Qué aprendí? <span class="required">*</span></label>
+              <textarea id="learningFormWhatLearned" rows="2" required placeholder="El nuevo conocimiento o destreza asimilada..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="learningFormVerification">6. ¿Cómo comprobé que mejoré? <span class="required">*</span></label>
+              <textarea id="learningFormVerification" rows="2" required placeholder="Evidencia empírica objetiva (ej. resolver 5 problemas sin error)..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="learningFormReflection">Reflexión Personal Final del Proceso</label>
+              <textarea id="learningFormReflection" rows="2" placeholder="Conclusión general sobre tu evolución..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Evidencias del Progreso (Fotos de apuntes / Ejercicios resueltos)</label>
+              <div class="file-uploader-box">
+                <input type="file" id="learningFormFiles" multiple accept="image/*,.pdf" class="file-hidden-input">
+                <div class="uploader-prompt">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  <span>Haz clic para adjuntar imágenes de tu avance</span>
+                </div>
+              </div>
+              <div id="learningFormFilesPreview" class="attached-items-list"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeModal('learningModal')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitLearningForm">Guardar Situación</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. MODAL VISOR DETALLADO DE ELEMENTOS (Lectura cómoda de prácticas, talleres, parciales) -->
+  <div class="modal" id="itemViewerModal" role="dialog" aria-modal="true" aria-labelledby="itemViewerTitle">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-title">
+            <span class="step-badge" id="itemViewerBadge">📄</span>
+            <h3 id="itemViewerTitle">Detalle de Actividad</h3>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal('itemViewerModal')" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="modal-body" id="itemViewerBody">
+          <!-- Contenido renderizado dinámicamente -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" onclick="closeModal('itemViewerModal')">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. MODAL: EDITAR PERFIL DE ESTUDIANTE -->
+  <div class="modal" id="profileModal" role="dialog" aria-modal="true" aria-labelledby="profileModalTitle">
+    <div class="modal-dialog modal-dialog-md">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-title">
+            <span class="step-badge">🎓</span>
+            <h3 id="profileModalTitle">Editar Datos Académicos</h3>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal('profileModal')" aria-label="Cerrar">✕</button>
+        </div>
+        <form id="profileForm" class="modal-form" novalidate>
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="inputStudentName">Nombre completo del estudiante <span class="required">*</span></label>
+              <input type="text" id="inputStudentName" required placeholder="Ej. Alejandro Morales Rivera">
+            </div>
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="inputUniversity">Universidad o Institución</label>
+                <input type="text" id="inputUniversity" placeholder="Ej. Universidad Nacional de Ingeniería">
+              </div>
+              <div class="form-group">
+                <label for="inputCareer">Carrera o Especialidad</label>
+                <input type="text" id="inputCareer" placeholder="Ej. Ingeniería Mecánica">
+              </div>
+            </div>
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="inputProfessor">Docente de la Cátedra</label>
+                <input type="text" id="inputProfessor" placeholder="Ej. Dr. Carlos E. Mendoza">
+              </div>
+              <div class="form-group">
+                <label for="inputSemester">Semestre Académico</label>
+                <input type="text" id="inputSemester" placeholder="Ej. 2026-I">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="inputObjectives">Objetivos del Portafolio</label>
+              <textarea id="inputObjectives" rows="3" placeholder="Describe los propósitos formativos del portafolio..."></textarea>
+            </div>
+            <div class="form-group">
+              <label for="inputPresentation">Presentación del Portafolio</label>
+              <textarea id="inputPresentation" rows="3" placeholder="Describe brevemente el portafolio..."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeModal('profileModal')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitProfileForm">Guardar Datos</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 10. MODAL: DIÁLOGO DE CONFIRMACIÓN GENÉRICO -->
+  <div class="modal" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="confirmModalTitle">Confirmación Requerida</h3>
+          <button class="modal-close-btn" onclick="closeConfirmDialog()" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p id="confirmModalMessage">¿Estás seguro de continuar con esta acción?</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="confirmModalCancelBtn" onclick="closeConfirmDialog()">Cancelar</button>
+          <button type="button" class="btn btn-danger" id="confirmModalAcceptBtn">Confirmar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 11. MODAL: VISOR DE ARCHIVO / LIGHTBOX -->
+  <div class="modal" id="fileViewerModal" role="dialog" aria-modal="true">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-content file-viewer-content">
+        <div class="modal-header">
+          <h3 id="fileViewerTitle">Vista Previa de Evidencia</h3>
+          <div class="file-viewer-actions">
+            <a href="#" id="fileViewerDownloadBtn" download class="btn btn-sm btn-outline">Descargar</a>
+            <button class="modal-close-btn" onclick="closeFileViewer()" aria-label="Cerrar">✕</button>
+          </div>
+        </div>
+        <div class="modal-body file-viewer-body" id="fileViewerBody">
+          <!-- Imagen o iframe insertado dinámicamente -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notificaciones Toast -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Script principal de la aplicación -->
+  <script src="js/app.js"></script>
+</body>
+</html>

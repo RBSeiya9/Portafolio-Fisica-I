@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="100%" height="100%">
+  <defs>
+    <linearGradient id="parcialBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="100%" stop-color="#1E293B"/>
+    </linearGradient>
+    <marker id="arrProj" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#38BDF8"/>
+    </marker>
+  </defs>
+
+  <rect width="800" height="500" rx="16" fill="url(#parcialBg)"/>
+
+  <!-- Título de la corrección -->
+  <text x="40" y="45" font-family="'Outfit', sans-serif" font-size="20" font-weight="bold" fill="#FFFFFF">CORRECCIÓN DE PARCIAL: TIRO PARABÓLICO CON DESNIVEL</text>
+  <text x="40" y="70" font-family="'Inter', sans-serif" font-size="12" fill="#EF4444">Error Conceptual: Aplicación de fórmula simplificada vs Resolución analítica de trayectoria real</text>
+
+  <!-- Acantilado vertical -->
+  <rect x="60" y="240" width="140" height="200" fill="#334155" stroke="#475569" stroke-width="2"/>
+  <text x="90" y="340" font-family="'Inter', sans-serif" font-size="14" font-weight="bold" fill="#CBD5E1">h₀ = 45 m</text>
+  <!-- Suelo inferior -->
+  <line x1="200" y1="440" x2="740" y2="440" stroke="#64748B" stroke-width="3"/>
+  <text x="680" y="465" font-family="'Inter', sans-serif" font-size="12" fill="#64748B">Suelo (y = 0)</text>
+
+  <!-- Vector velocidad inicial -->
+  <line x1="200" y1="240" x2="280" y2="180" stroke="#38BDF8" stroke-width="3" marker-end="url(#arrProj)"/>
+  <text x="240" y="170" font-family="'Inter', sans-serif" font-size="13" font-weight="bold" fill="#38BDF8">v₀ = 25 m/s (37°)</text>
+
+  <!-- Trayectoria errónea supuesta (al mismo nivel) -->
+  <path d="M 200 240 Q 340 100 480 240" fill="none" stroke="#EF4444" stroke-dasharray="5,5" stroke-width="2"/>
+  <circle cx="480" cy="240" r="5" fill="#EF4444"/>
+  <text x="420" y="225" font-family="'Inter', sans-serif" font-size="11" fill="#EF4444">Alcance Erróneo R = 61.3 m</text>
+
+  <!-- Trayectoria Real Completa que desciende hasta el suelo -->
+  <path d="M 200 240 Q 360 85 520 280 T 670 440" fill="none" stroke="#10B981" stroke-width="3.5"/>
+  <circle cx="670" cy="440" r="6" fill="#10B981"/>
+  <text x="560" y="425" font-family="'Inter', sans-serif" font-size="13" font-weight="bold" fill="#10B981">Impacto Real: x = 98.4 m</text>
+
+  <!-- Cuadro Metacognitivo en la parte superior -->
+  <g transform="translate(450, 100)">
+    <rect width="310" height="130" rx="10" fill="#0F172A" stroke="#EA580C" stroke-width="1.5"/>
+    <text x="14" y="24" font-family="'Outfit', sans-serif" font-size="12" font-weight="bold" fill="#EA580C">DIAGNÓSTICO DEL ERROR DEL ESTUDIANTE</text>
+    <text x="14" y="48" font-family="'Inter', sans-serif" font-size="11" fill="#CBD5E1">La fórmula R = (v₀² sin 2θ)/g asume Δy = 0.</text>
+    <text x="14" y="68" font-family="'Inter', sans-serif" font-size="11" fill="#CBD5E1">Ignoró los 45 m de caída vertical extra.</text>
+    <line x1="14" y1="80" x2="296" y2="80" stroke="#334155"/>
+    <text x="14" y="100" font-family="'Inter', sans-serif" font-size="11" font-weight="bold" fill="#10B981">SOLUCIÓN CORRECTA: Cuadrática y(t) = 0</text>
+    <text x="14" y="118" font-family="'Fira Code', monospace" font-size="11" fill="#4ADE80">t_vuelo = 4.93 s ⇒ x = 19.96(4.93) = 98.4 m</text>
+  </g>
+</svg>
