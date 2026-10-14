@@ -223,6 +223,7 @@ const DEFAULT_DB = {
     name: "Alejandro Morales",
     career: "Ingeniería Mecánica",
     university: "Facultad de Ingeniería",
+    professor: "Dr. Carlos E. Mendoza",
     term: "2026-I",
     bio: "Estudiante de ingeniería enfocado en mecánica clásica, modelado analítico y análisis experimental de sistemas físicos.",
     goals: "Comprender a profundidad los modelos vectoriales y las leyes de movimiento, superando dificultades conceptuales mediante el análisis de errores y la verificación experimental."
@@ -659,8 +660,47 @@ let filters = {
   learningsTopic: "all"
 };
 
+function migrateLegacyStorageIfNeeded() {
+  if (localStorage.getItem(STORAGE_KEY_DB)) return true;
+
+  const legacyProfileRaw = localStorage.getItem(LEGACY_STORAGE_KEY_PROFILE);
+  const legacyTopicsRaw = localStorage.getItem(LEGACY_STORAGE_KEY_TOPICS);
+
+  if (!legacyProfileRaw && !legacyTopicsRaw) return false;
+
+  try {
+    const migrated = structuredClone(DEFAULT_DB);
+    const legacyProfile = legacyProfileRaw ? JSON.parse(legacyProfileRaw) : null;
+    const legacyTopics = legacyTopicsRaw ? JSON.parse(legacyTopicsRaw) : [];
+
+    if (legacyProfile && typeof legacyProfile === "object") {
+      migrated.profile = { ...migrated.profile, ...legacyProfile };
+    }
+
+    if (Array.isArray(legacyTopics) && legacyTopics.length > 0) {
+      migrated.topics = legacyTopics.map((topic, index) => ({
+        ...structuredClone(DEFAULT_DB.topics[0] || {}),
+        ...topic,
+        id: topic.id || generateUniqueId("tema"),
+        order: typeof topic.order === "number" ? topic.order : index + 1,
+        definitions: Array.isArray(topic.definitions) ? topic.definitions : [],
+        formulas: Array.isArray(topic.formulas) ? topic.formulas : [],
+        metacognition: Array.isArray(topic.metacognition) ? topic.metacognition : [],
+        evidencias: Array.isArray(topic.evidencias) ? topic.evidencias : []
+      }));
+    }
+
+    localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(migrated));
+    return true;
+  } catch (err) {
+    console.warn("No fue posible migrar datos antiguos de LocalStorage:", err);
+    return false;
+  }
+}
+
 function loadDatabase() {
   try {
+    migrateLegacyStorageIfNeeded();
     const raw = localStorage.getItem(STORAGE_KEY_DB);
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -671,41 +711,79 @@ function loadDatabase() {
       parsed.exams = Array.isArray(parsed.exams) ? parsed.exams : structuredClone(DEFAULT_DB.exams);
       parsed.learnings = Array.isArray(parsed.learnings) ? parsed.learnings : structuredClone(DEFAULT_DB.learnings);
 
-      // Normalizar estructura de cada tema a las 4 secciones solicitadas
+      // Limpieza segura de registros fantasma vacíos causados por unshifts previos
+      parsed.workshops = parsed.workshops.filter(w => {
+        return Boolean((w.title && w.title.trim()) || (w.statement && w.statement.trim()) || (w.stepByStep && w.stepByStep.trim()) || (w.finalAnswer && w.finalAnswer.trim()));
+      });
+      if (parsed.workshops.length === 0) {
+        parsed.workshops = structuredClone(DEFAULT_DB.workshops);
+      }
+
+      parsed.exams = parsed.exams.filter(e => {
+        return Boolean((e.title && e.title.trim()) || (e.statement && e.statement.trim()) || (e.correctSolution && e.correctSolution.trim()));
+      });
+      if (parsed.exams.length === 0) {
+        parsed.exams = structuredClone(DEFAULT_DB.exams);
+      }
+
+      parsed.learnings = parsed.learnings.filter(l => {
+        return Boolean((l.title && l.title.trim()) || (l.difficulty && l.difficulty.trim()) || (l.whatILearned && l.whatILearned.trim()));
+      });
+      if (parsed.learnings.length === 0) {
+        parsed.learnings = structuredClone(DEFAULT_DB.learnings);
+      }
+
+      // Normalizar y sanear estructura de cada tema a las 4 secciones solicitadas
+      parsed.topics = parsed.topics.filter(t => Boolean(t.title && t.title.trim()));
+      if (parsed.topics.length === 0) {
+        parsed.topics = structuredClone(DEFAULT_DB.topics);
+      }
+
       parsed.topics.forEach((t) => {
         // 1. Definiciones
         if (Array.isArray(t.definitions)) {
-          t.definitions = t.definitions.map(d => ({
-            id: d.id || generateUniqueId("card_def"),
-            title: d.title || d.term || "",
-            text: d.text || d.definition || "",
-            imageData: d.imageData || null,
-            imageFileId: d.imageFileId || null,
-            imageName: d.imageName || null
-          }));
+          t.definitions = t.definitions
+            .map(d => ({
+              id: d.id || generateUniqueId("card_def"),
+              title: d.title || d.term || "",
+              text: d.text || d.definition || "",
+              imageData: d.imageData || null,
+              imageFileId: d.imageFileId || null,
+              imageName: d.imageName || null
+            }))
+            .filter(d => Boolean((d.title && d.title.trim()) || (d.text && d.text.trim()) || d.imageData));
         } else {
           t.definitions = [];
         }
 
+        // Si las definiciones de tema-vectores quedaron vacías por fantasmas, recuperar las 5 predeterminadas
+        if (t.id === "tema-vectores" && t.definitions.length === 0) {
+          const defaultVec = DEFAULT_DB.topics.find(x => x.id === "tema-vectores");
+          if (defaultVec) t.definitions = structuredClone(defaultVec.definitions);
+        }
+
         // 2. Fórmulas
         if (Array.isArray(t.formulas)) {
-          t.formulas = t.formulas.map(f => ({
-            id: f.id || generateUniqueId("card_form"),
-            title: f.title || f.name || "",
-            latex: f.latex || "",
-            text: f.text || [f.variables, f.conditions, f.example].filter(Boolean).join("\n") || "",
-            imageData: f.imageData || null,
-            imageFileId: f.imageFileId || null,
-            imageName: f.imageName || null
-          }));
+          t.formulas = t.formulas
+            .map(f => ({
+              id: f.id || generateUniqueId("card_form"),
+              title: f.title || f.name || "",
+              latex: f.latex || "",
+              text: f.text || [f.variables, f.conditions, f.example].filter(Boolean).join("\n") || "",
+              imageData: f.imageData || null,
+              imageFileId: f.imageFileId || null,
+              imageName: f.imageName || null
+            }))
+            .filter(f => Boolean((f.title && f.title.trim()) || (f.text && f.text.trim()) || (f.latex && f.latex.trim()) || f.imageData));
         } else {
           t.formulas = [];
         }
 
         // 3. Metacognición
-        if (!Array.isArray(t.metacognition)) {
+        if (Array.isArray(t.metacognition)) {
+          t.metacognition = t.metacognition.filter(m => Boolean((m.title && m.title.trim()) || (m.text && m.text.trim()) || m.imageData));
+        } else {
           t.metacognition = [];
-          // Si existían situaciones asociadas a este tema en learnings, migrarlas
           if (Array.isArray(parsed.learnings)) {
             const topicLearnings = parsed.learnings.filter(l => l.topicId === t.id);
             topicLearnings.forEach(l => {
@@ -720,7 +798,9 @@ function loadDatabase() {
         }
 
         // 4. Evidencias
-        if (!Array.isArray(t.evidencias)) {
+        if (Array.isArray(t.evidencias)) {
+          t.evidencias = t.evidencias.filter(ev => Boolean((ev.title && ev.title.trim()) || (ev.text && ev.text.trim()) || ev.imageData));
+        } else {
           t.evidencias = [];
           if (t.mapFile && t.mapFile.data) {
             t.evidencias.push({
@@ -854,9 +934,9 @@ function updateStorageMeter() {
 }
 
 function getTopicTitleById(topicId) {
-  if (!topicId) return "General / No especificado";
-  const t = appDB.topics.find(x => x.id === topicId);
-  return t ? t.title : "Tema no encontrado";
+  if (!topicId) return "";
+  const t = (appDB && appDB.topics) ? appDB.topics.find(x => x.id === topicId) : null;
+  return t ? t.title : "";
 }
 
 // ============================================================================
@@ -984,7 +1064,7 @@ function renderActiveView() {
 }
 
 function updateProfileUI() {
-  const p = appDB.profile;
+  const p = appDB.profile || {};
   const avatar = document.getElementById("sidebarAvatar");
   const name = document.getElementById("sidebarStudentName");
   const meta = document.getElementById("sidebarStudentMeta");
@@ -995,6 +1075,23 @@ function updateProfileUI() {
     const initials = (p.name || "E").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
     avatar.textContent = initials || "AM";
   }
+
+  // Tarjeta de perfil en el Inicio (Dashboard)
+  const sName = document.getElementById("profileStudentName");
+  const sCareer = document.getElementById("profileCareer");
+  const sUniv = document.getElementById("profileUniversity");
+  const sProf = document.getElementById("profileProfessor");
+  const sSem = document.getElementById("profileSemester");
+  const sObj = document.getElementById("profileObjectives");
+  const sPres = document.getElementById("profilePresentation");
+
+  if (sName) sName.textContent = p.name || "Estudiante";
+  if (sCareer) sCareer.textContent = p.career || "Ingeniería Mecánica";
+  if (sUniv) sUniv.textContent = p.university || "Facultad de Ingeniería";
+  if (sProf) sProf.textContent = p.professor || "Dr. Carlos E. Mendoza";
+  if (sSem) sSem.textContent = p.term || "2026-I";
+  if (sObj) sObj.textContent = p.goals || "Sin objetivos registrados.";
+  if (sPres) sPres.textContent = p.bio || "Sin presentación registrada.";
 }
 
 function populateTopicSelects() {
@@ -1402,23 +1499,26 @@ function createAcademicCardHTML(card, section, topicId) {
 // ============================================================================
 
 let currentActiveCard = null;
+let isNewCard = false;
+let currentActiveCardContext = { topicId: null, section: null };
 
 function openCardModal(section, cardId = null, topicId = null) {
   const topic = appDB.topics.find(t => t.id === topicId);
   if (!topic) return;
 
-  const sectionArray = topic[section];
-  if (!Array.isArray(sectionArray)) topic[section] = [];
+  if (!Array.isArray(topic[section])) topic[section] = [];
 
   let card = null;
-  let isNew = false;
-
   if (cardId) {
-    card = topic[section].find(c => c.id === cardId);
+    const existing = topic[section].find(c => c.id === cardId);
+    if (existing) {
+      card = existing;
+      isNewCard = false;
+    }
   }
 
   if (!card) {
-    isNew = true;
+    isNewCard = true;
     card = {
       id: generateUniqueId("card"),
       title: "",
@@ -1428,11 +1528,10 @@ function openCardModal(section, cardId = null, topicId = null) {
       imageFileId: null,
       imageName: null
     };
-    topic[section].unshift(card);
-    scheduleAutoSave(0); // Guardado inmediato del nuevo registro
   }
 
   currentActiveCard = card;
+  currentActiveCardContext = { topicId, section };
 
   // Llenar campos del modal
   document.getElementById("cardEditorTopicId").value = topicId;
@@ -1463,27 +1562,24 @@ function openCardModal(section, cardId = null, topicId = null) {
     metacognition: "✦ Metacognición",
     evidencias: "📂 Evidencia Gráfica"
   };
-  document.getElementById("cardEditorModalTitle").textContent = isNew
+  document.getElementById("cardEditorModalTitle").textContent = isNewCard
     ? `Nueva Tarjeta (${icons[section] || 'Académica'})`
     : `Editar Tarjeta (${icons[section] || 'Académica'})`;
 
   renderCardEditorImageUI();
 
-  // Enlazar eventos de guardado en tiempo real al escribir
+  // Enlazar eventos de borrador al escribir
   titleInput.oninput = () => {
-    card.title = titleInput.value;
-    scheduleAutoSave();
+    currentActiveCard.title = titleInput.value;
   };
 
   textInput.oninput = () => {
-    card.text = textInput.value;
-    scheduleAutoSave();
+    currentActiveCard.text = textInput.value;
   };
 
   latexInput.oninput = () => {
-    card.latex = latexInput.value;
-    updateCardEditorLatexPreview(card.latex);
-    scheduleAutoSave();
+    currentActiveCard.latex = latexInput.value;
+    updateCardEditorLatexPreview(currentActiveCard.latex);
   };
 
   // Selector de imagen nueva
@@ -1499,22 +1595,73 @@ function openCardModal(section, cardId = null, topicId = null) {
   // Botón para quitar imagen
   const removeImgBtn = document.getElementById("cardEditorRemoveImageBtn");
   removeImgBtn.onclick = () => {
-    card.imageData = null;
-    card.imageFileId = null;
-    card.imageName = null;
+    currentActiveCard.imageData = null;
+    currentActiveCard.imageFileId = null;
+    currentActiveCard.imageName = null;
     renderCardEditorImageUI();
-    scheduleAutoSave(0);
     showToast("Imagen eliminada de la tarjeta.", "info");
   };
 
   // Botón para eliminar tarjeta
   const deleteBtn = document.getElementById("cardEditorDeleteBtn");
-  deleteBtn.onclick = () => {
-    closeModal("cardEditorModal");
-    confirmDelete("card", card.id, { topicId, section });
-  };
+  if (deleteBtn) {
+    if (isNewCard) {
+      deleteBtn.style.display = "none";
+    } else {
+      deleteBtn.style.display = "inline-flex";
+      deleteBtn.onclick = () => {
+        closeModal("cardEditorModal");
+        confirmDelete("card", card.id, { topicId, section });
+      };
+    }
+  }
 
   openModal("cardEditorModal");
+}
+
+function saveCardEditorChanges() {
+  const { topicId, section } = currentActiveCardContext;
+  if (!topicId || !section || !currentActiveCard) {
+    closeModal("cardEditorModal");
+    return;
+  }
+  const topic = appDB.topics.find(t => t.id === topicId);
+  if (!topic) {
+    closeModal("cardEditorModal");
+    return;
+  }
+  if (!Array.isArray(topic[section])) topic[section] = [];
+
+  const titleInput = document.getElementById("cardEditorTitle");
+  const textInput = document.getElementById("cardEditorText");
+  const latexInput = document.getElementById("cardEditorLatex");
+
+  if (titleInput) currentActiveCard.title = titleInput.value.trim();
+  if (textInput) currentActiveCard.text = textInput.value.trim();
+  if (latexInput && section === "formulas") currentActiveCard.latex = latexInput.value.trim();
+
+  const hasContent = Boolean(
+    (currentActiveCard.title && currentActiveCard.title.trim()) ||
+    (currentActiveCard.text && currentActiveCard.text.trim()) ||
+    (section === "formulas" && currentActiveCard.latex && currentActiveCard.latex.trim()) ||
+    currentActiveCard.imageData
+  );
+
+  if (isNewCard) {
+    if (hasContent) {
+      topic[section].push(currentActiveCard);
+    } else {
+      showToast("La tarjeta no contiene información y no fue creada.", "info");
+      closeModal("cardEditorModal");
+      return;
+    }
+  }
+
+  saveDatabase();
+  closeModal("cardEditorModal");
+  renderTopicDetail(topicId);
+  updateNavBadges();
+  showToast("✓ Tarjeta guardada correctamente.", "success");
 }
 
 function renderCardEditorImageUI() {
@@ -1607,6 +1754,18 @@ function initPracticasDropzone() {
       handlePracticesBatchUpload(files);
     }
   });
+
+  // Botón para alternar visibilidad de la zona de arrastre
+  const toggleBtn = document.getElementById("togglePracticeDropzoneBtn");
+  if (toggleBtn && !toggleBtn._hasListener) {
+    toggleBtn._hasListener = true;
+    toggleBtn.onclick = () => {
+      dropzone.classList.toggle("visible");
+      const isVis = dropzone.classList.contains("visible");
+      toggleBtn.classList.toggle("active", isVis);
+      toggleBtn.textContent = isVis ? "✕ Ocultar zona de arrastre" : "📂 Zona de arrastre";
+    };
+  }
 
   // Inputs de carga
   const headerInput = document.getElementById("practiceHeaderFileInput");
@@ -1769,7 +1928,7 @@ function renderTalleres() {
 
   let filtered = appDB.workshops.filter(w => {
     const matchSearch = !filters.workshopsSearch ||
-      w.title.toLowerCase().includes(filters.workshopsSearch.toLowerCase()) ||
+      (w.title && w.title.toLowerCase().includes(filters.workshopsSearch.toLowerCase())) ||
       (w.statement && w.statement.toLowerCase().includes(filters.workshopsSearch.toLowerCase())) ||
       (w.finalAnswer && w.finalAnswer.toLowerCase().includes(filters.workshopsSearch.toLowerCase()));
     const matchTopic = filters.workshopsTopic === "all" || w.topicId === filters.workshopsTopic;
@@ -1781,13 +1940,15 @@ function renderTalleres() {
     if (empty) empty.classList.remove("hidden");
   } else {
     if (empty) empty.classList.add("hidden");
-    grid.innerHTML = filtered.map(w => `
+    grid.innerHTML = filtered.map(w => {
+      const topicTitle = w.topicId ? getTopicTitleById(w.topicId) : "";
+      return `
       <div class="activity-card" id="workshop-el-${escapeHTML(w.id)}">
         <div class="activity-card-top">
           <span class="activity-type-badge taller">📝 Taller</span>
-          <span class="activity-date">${escapeHTML(w.date || '2026-10-12')}</span>
+          <span class="activity-date">${escapeHTML(w.date || '')}</span>
         </div>
-        <div class="activity-card-topic">${escapeHTML(getTopicTitleById(w.topicId))}</div>
+        ${topicTitle ? `<div class="activity-card-topic">${escapeHTML(topicTitle)}</div>` : ''}
         <h3 class="activity-card-title">${escapeHTML(w.title)}</h3>
         <p class="activity-card-snippet">${escapeHTML(w.statement || "")}</p>
         ${w.finalAnswer ? `
@@ -1809,22 +1970,80 @@ function renderTalleres() {
           </div>
         </div>
       </div>
-    `).join("");
+    `;
+    }).join("");
   }
 }
 
+function setupModalFilesAttachment(inputElId, previewElId, item) {
+  const input = document.getElementById(inputElId);
+  const preview = document.getElementById(previewElId);
+  if (!input || !preview || !item) return;
+
+  if (!Array.isArray(item.files)) item.files = [];
+
+  const renderPreviews = () => {
+    if (!item.files || item.files.length === 0) {
+      preview.innerHTML = "";
+      return;
+    }
+    preview.innerHTML = item.files.map((f, idx) => `
+      <div class="attached-file-pill" style="display: inline-flex; align-items: center; gap: 8px; background: #e2e8f0; padding: 4px 10px; border-radius: 6px; font-size: 12px; margin: 4px 4px 4px 0;">
+        <span>📎 ${escapeHTML(f.name)} (${formatBytes(f.size)})</span>
+        <button type="button" class="remove-attach-btn" data-index="${idx}" style="background: none; border: none; cursor: pointer; color: #ef4444; font-weight: bold;" title="Quitar archivo">✕</button>
+      </div>
+    `).join("");
+
+    preview.querySelectorAll(".remove-attach-btn").forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        const index = parseInt(btn.getAttribute("data-index"), 10);
+        item.files.splice(index, 1);
+        renderPreviews();
+      };
+    });
+  };
+
+  renderPreviews();
+
+  input.onchange = (e) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    Array.from(e.target.files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        const fileId = generateUniqueId("att");
+        await FileStorage.saveFile(fileId, file.name, file.type, file.size, evt.target.result);
+        item.files.push({
+          id: fileId,
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          data: evt.target.result
+        });
+        renderPreviews();
+        showToast(`Archivo "${file.name}" adjuntado.`, "success");
+      };
+      reader.readAsDataURL(file);
+    });
+    input.value = "";
+  };
+}
+
 let activeEditingWorkshop = null;
+let isNewWorkshop = false;
 
 function openWorkshopModal(workshopId = null) {
   let item = null;
-  let isNew = false;
-
   if (workshopId) {
-    item = appDB.workshops.find(w => w.id === workshopId);
+    const existing = appDB.workshops.find(w => w.id === workshopId);
+    if (existing) {
+      item = existing;
+      isNewWorkshop = false;
+    }
   }
 
   if (!item) {
-    isNew = true;
+    isNewWorkshop = true;
     item = {
       id: generateUniqueId("tall"),
       topicId: "",
@@ -1838,16 +2057,16 @@ function openWorkshopModal(workshopId = null) {
       reflection: "",
       files: []
     };
-    appDB.workshops.unshift(item);
-    scheduleAutoSave(0);
   }
 
   activeEditingWorkshop = item;
 
-  document.getElementById("workshopModalTitle").textContent = isNew ? "Registrar Nuevo Taller" : "Editar Taller";
+  const existingWorkshopIndex = isNewWorkshop ? -1 : appDB.workshops.findIndex(w => w.id === item.id);
+
+  document.getElementById("workshopModalTitle").textContent = isNewWorkshop ? "Registrar Nuevo Taller" : "Editar Taller";
   document.getElementById("workshopFormId").value = item.id;
   document.getElementById("workshopFormTitle").value = item.title || "";
-  document.getElementById("workshopFormDate").value = item.date || "";
+  document.getElementById("workshopFormDate").value = item.date || new Date().toISOString().slice(0, 10);
   document.getElementById("workshopFormTopicSelect").value = item.topicId || "";
   document.getElementById("workshopFormStatement").value = item.statement || "";
   document.getElementById("workshopFormFormulas").value = item.formulas || "";
@@ -1856,37 +2075,44 @@ function openWorkshopModal(workshopId = null) {
   document.getElementById("workshopFormVerification").value = item.verification || "";
   document.getElementById("workshopFormReflection").value = item.reflection || "";
 
-  // Enlazar guardado automático en tiempo real en cada campo
-  const fields = [
-    { id: "workshopFormTitle", prop: "title" },
-    { id: "workshopFormDate", prop: "date" },
-    { id: "workshopFormTopicSelect", prop: "topicId" },
-    { id: "workshopFormStatement", prop: "statement" },
-    { id: "workshopFormFormulas", prop: "formulas" },
-    { id: "workshopFormStepByStep", prop: "stepByStep" },
-    { id: "workshopFormAnswer", prop: "finalAnswer" },
-    { id: "workshopFormVerification", prop: "verification" },
-    { id: "workshopFormReflection", prop: "reflection" }
-  ];
-
-  fields.forEach(f => {
-    const el = document.getElementById(f.id);
-    if (el) {
-      el.oninput = () => {
-        item[f.prop] = el.value;
-        scheduleAutoSave();
-      };
-      el.onchange = () => {
-        item[f.prop] = el.value;
-        scheduleAutoSave();
-      };
-    }
-  });
+  setupModalFilesAttachment("workshopFormFiles", "workshopFormFilesPreview", item);
 
   const form = document.getElementById("workshopForm");
   form.onsubmit = (e) => {
     e.preventDefault();
-    flushAutoSave();
+    const titleVal = document.getElementById("workshopFormTitle").value.trim();
+    if (!titleVal) {
+      showToast("Ingresa un título para el taller.", "error");
+      document.getElementById("workshopFormTitle").focus();
+      return;
+    }
+    const stmtVal = document.getElementById("workshopFormStatement").value.trim();
+    if (!stmtVal) {
+      showToast("Ingresa el enunciado o problema del taller.", "error");
+      document.getElementById("workshopFormStatement").focus();
+      return;
+    }
+
+    item.title = titleVal;
+    item.date = document.getElementById("workshopFormDate").value;
+    item.topicId = document.getElementById("workshopFormTopicSelect").value;
+    item.statement = stmtVal;
+    item.formulas = document.getElementById("workshopFormFormulas").value;
+    item.stepByStep = document.getElementById("workshopFormStepByStep").value;
+    item.finalAnswer = document.getElementById("workshopFormAnswer").value;
+    item.verification = document.getElementById("workshopFormVerification").value;
+    item.reflection = document.getElementById("workshopFormReflection").value;
+
+    if (isNewWorkshop) {
+      appDB.workshops.unshift(item);
+    } else {
+      const index = appDB.workshops.findIndex(w => w.id === item.id);
+      if (index >= 0) {
+        appDB.workshops[index] = { ...appDB.workshops[index], ...item };
+      }
+    }
+
+    saveDatabase();
     closeModal("workshopModal");
     renderTalleres();
     updateNavBadges();
@@ -1907,7 +2133,7 @@ function renderParciales() {
 
   let filtered = appDB.exams.filter(e => {
     const matchSearch = !filters.examsSearch ||
-      e.title.toLowerCase().includes(filters.examsSearch.toLowerCase()) ||
+      (e.title && e.title.toLowerCase().includes(filters.examsSearch.toLowerCase())) ||
       (e.statement && e.statement.toLowerCase().includes(filters.examsSearch.toLowerCase())) ||
       (e.identifiedError && e.identifiedError.toLowerCase().includes(filters.examsSearch.toLowerCase()));
     const matchTopic = filters.examsTopic === "all" || e.topicId === filters.examsTopic;
@@ -1919,13 +2145,15 @@ function renderParciales() {
     if (empty) empty.classList.remove("hidden");
   } else {
     if (empty) empty.classList.add("hidden");
-    grid.innerHTML = filtered.map(e => `
+    grid.innerHTML = filtered.map(e => {
+      const topicTitle = e.topicId ? getTopicTitleById(e.topicId) : "";
+      return `
       <div class="activity-card" id="exam-el-${escapeHTML(e.id)}">
         <div class="activity-card-top">
           <span class="activity-type-badge parcial">🎯 Parcial</span>
-          <span class="activity-date">${escapeHTML(e.date || '2026-10-12')}</span>
+          <span class="activity-date">${escapeHTML(e.date || '')}</span>
         </div>
-        <div class="activity-card-topic">${escapeHTML(getTopicTitleById(e.topicId))}</div>
+        ${topicTitle ? `<div class="activity-card-topic">${escapeHTML(topicTitle)}</div>` : ''}
         <h3 class="activity-card-title">${escapeHTML(e.title)}</h3>
         <p class="activity-card-snippet">${escapeHTML(e.statement || "")}</p>
         ${e.identifiedError ? `
@@ -1947,22 +2175,26 @@ function renderParciales() {
           </div>
         </div>
       </div>
-    `).join("");
+    `;
+    }).join("");
   }
 }
 
 let activeEditingExam = null;
+let isNewExam = false;
 
 function openExamModal(examId = null) {
   let item = null;
-  let isNew = false;
-
   if (examId) {
-    item = appDB.exams.find(e => e.id === examId);
+    const existing = appDB.exams.find(e => e.id === examId);
+    if (existing) {
+      item = existing;
+      isNewExam = false;
+    }
   }
 
   if (!item) {
-    isNew = true;
+    isNewExam = true;
     item = {
       id: generateUniqueId("parc"),
       topicId: "",
@@ -1977,16 +2209,16 @@ function openExamModal(examId = null) {
       preventionReflection: "",
       files: []
     };
-    appDB.exams.unshift(item);
-    scheduleAutoSave(0);
   }
 
   activeEditingExam = item;
 
-  document.getElementById("examModalTitle").textContent = isNew ? "Registrar Nuevo Parcial" : "Editar Corrección de Parcial";
+  const existingExamIndex = isNewExam ? -1 : appDB.exams.findIndex(e => e.id === item.id);
+
+  document.getElementById("examModalTitle").textContent = isNewExam ? "Registrar Nuevo Parcial" : "Editar Corrección de Parcial";
   document.getElementById("examFormId").value = item.id;
   document.getElementById("examFormTitle").value = item.title || "";
-  document.getElementById("examFormDate").value = item.date || "";
+  document.getElementById("examFormDate").value = item.date || new Date().toISOString().slice(0, 10);
   document.getElementById("examFormTopicSelect").value = item.topicId || "";
   document.getElementById("examFormContents").value = item.evaluatedContents || "";
   document.getElementById("examFormStatement").value = item.statement || "";
@@ -1996,38 +2228,39 @@ function openExamModal(examId = null) {
   document.getElementById("examFormVerification").value = item.verification || "";
   document.getElementById("examFormReflection").value = item.preventionReflection || "";
 
-  // Guardado en tiempo real en cada campo
-  const fields = [
-    { id: "examFormTitle", prop: "title" },
-    { id: "examFormDate", prop: "date" },
-    { id: "examFormTopicSelect", prop: "topicId" },
-    { id: "examFormContents", prop: "evaluatedContents" },
-    { id: "examFormStatement", prop: "statement" },
-    { id: "examFormOriginal", prop: "originalProcedure" },
-    { id: "examFormError", prop: "identifiedError" },
-    { id: "examFormCorrectSolution", prop: "correctSolution" },
-    { id: "examFormVerification", prop: "verification" },
-    { id: "examFormReflection", prop: "preventionReflection" }
-  ];
-
-  fields.forEach(f => {
-    const el = document.getElementById(f.id);
-    if (el) {
-      el.oninput = () => {
-        item[f.prop] = el.value;
-        scheduleAutoSave();
-      };
-      el.onchange = () => {
-        item[f.prop] = el.value;
-        scheduleAutoSave();
-      };
-    }
-  });
+  setupModalFilesAttachment("examFormFiles", "examFormFilesPreview", item);
 
   const form = document.getElementById("examForm");
   form.onsubmit = (e) => {
     e.preventDefault();
-    flushAutoSave();
+    const titleVal = document.getElementById("examFormTitle").value.trim();
+    if (!titleVal) {
+      showToast("Ingresa el título o número del examen parcial.", "error");
+      document.getElementById("examFormTitle").focus();
+      return;
+    }
+
+    item.title = titleVal;
+    item.date = document.getElementById("examFormDate").value;
+    item.topicId = document.getElementById("examFormTopicSelect").value;
+    item.evaluatedContents = document.getElementById("examFormContents").value;
+    item.statement = document.getElementById("examFormStatement").value;
+    item.originalProcedure = document.getElementById("examFormOriginal").value;
+    item.identifiedError = document.getElementById("examFormError").value;
+    item.correctSolution = document.getElementById("examFormCorrectSolution").value;
+    item.verification = document.getElementById("examFormVerification").value;
+    item.preventionReflection = document.getElementById("examFormReflection").value;
+
+    if (isNewExam) {
+      appDB.exams.unshift(item);
+    } else {
+      const index = appDB.exams.findIndex(e => e.id === item.id);
+      if (index >= 0) {
+        appDB.exams[index] = { ...appDB.exams[index], ...item };
+      }
+    }
+
+    saveDatabase();
     closeModal("examModal");
     renderParciales();
     updateNavBadges();
@@ -2048,7 +2281,7 @@ function renderAprendizaje() {
 
   let filtered = appDB.learnings.filter(l => {
     const matchSearch = !filters.learningsSearch ||
-      l.title.toLowerCase().includes(filters.learningsSearch.toLowerCase()) ||
+      (l.title && l.title.toLowerCase().includes(filters.learningsSearch.toLowerCase())) ||
       (l.difficulty && l.difficulty.toLowerCase().includes(filters.learningsSearch.toLowerCase())) ||
       (l.whatILearned && l.whatILearned.toLowerCase().includes(filters.learningsSearch.toLowerCase()));
     const matchTopic = filters.learningsTopic === "all" || l.topicId === filters.learningsTopic;
@@ -2060,12 +2293,14 @@ function renderAprendizaje() {
     if (empty) empty.classList.remove("hidden");
   } else {
     if (empty) empty.classList.add("hidden");
-    grid.innerHTML = filtered.map(l => `
+    grid.innerHTML = filtered.map(l => {
+      const topicTitle = l.topicId ? getTopicTitleById(l.topicId) : "";
+      return `
       <div class="activity-card" id="learning-el-${escapeHTML(l.id)}">
         <div class="activity-card-top">
           <span class="activity-type-badge aprendizaje">✦ Metacognición</span>
         </div>
-        <div class="activity-card-topic">${escapeHTML(getTopicTitleById(l.topicId))}</div>
+        ${topicTitle ? `<div class="activity-card-topic">${escapeHTML(topicTitle)}</div>` : ''}
         <h3 class="activity-card-title">${escapeHTML(l.title)}</h3>
         <p class="activity-card-snippet"><strong>1. Dificultad:</strong> ${escapeHTML(l.difficulty || "")}</p>
         <div class="activity-card-footer">
@@ -2082,20 +2317,26 @@ function renderAprendizaje() {
           </div>
         </div>
       </div>
-    `).join("");
+    `;
+    }).join("");
   }
 }
 
+let activeEditingLearning = null;
+let isNewLearning = false;
+
 function openLearningModal(learnId = null) {
   let item = null;
-  let isNew = false;
-
   if (learnId) {
-    item = appDB.learnings.find(l => l.id === learnId);
+    const existing = appDB.learnings.find(l => l.id === learnId);
+    if (existing) {
+      item = existing;
+      isNewLearning = false;
+    }
   }
 
   if (!item) {
-    isNew = true;
+    isNewLearning = true;
     item = {
       id: generateUniqueId("learn"),
       topicId: "",
@@ -2109,51 +2350,59 @@ function openLearningModal(learnId = null) {
       personalReflection: "",
       files: []
     };
-    appDB.learnings.unshift(item);
-    scheduleAutoSave(0);
   }
 
-  document.getElementById("learningModalTitle").textContent = isNew ? "Registrar Nueva Situación" : "Editar Situación de Aprendizaje";
+  activeEditingLearning = item;
+
+  const existingLearningIndex = isNewLearning ? -1 : appDB.learnings.findIndex(l => l.id === item.id);
+
+  document.getElementById("learningModalTitle").textContent = isNewLearning ? "Registrar Nueva Situación" : "Editar Situación de Aprendizaje";
   document.getElementById("learningFormId").value = item.id;
   document.getElementById("learningFormTitle").value = item.title || "";
   document.getElementById("learningFormTopicSelect").value = item.topicId || "";
   document.getElementById("learningFormDifficulty").value = item.difficulty || "";
   document.getElementById("learningFormConcept").value = item.uncomprehendedConcept || "";
   document.getElementById("learningFormStrategy").value = item.strategyUsed || "";
+  const resEl = document.getElementById("learningFormResources");
+  if (resEl) resEl.value = item.helpfulResources || "";
   const whatLearnedEl = document.getElementById("learningFormWhatLearned");
   if (whatLearnedEl) whatLearnedEl.value = item.whatILearned || "";
-
   const verificationEl = document.getElementById("learningFormVerification");
   if (verificationEl) verificationEl.value = item.howIVerified || "";
-
   document.getElementById("learningFormReflection").value = item.personalReflection || "";
 
-  // Guardado en tiempo real
-  const fields = [
-    { el: document.getElementById("learningFormTitle"), prop: "title" },
-    { el: document.getElementById("learningFormTopicSelect"), prop: "topicId" },
-    { el: document.getElementById("learningFormDifficulty"), prop: "difficulty" },
-    { el: document.getElementById("learningFormConcept"), prop: "uncomprehendedConcept" },
-    { el: document.getElementById("learningFormStrategy"), prop: "strategyUsed" },
-    { el: document.getElementById("learningFormResources"), prop: "helpfulResources" },
-    { el: whatLearnedEl, prop: "whatILearned" },
-    { el: verificationEl, prop: "howIVerified" },
-    { el: document.getElementById("learningFormReflection"), prop: "personalReflection" }
-  ];
-
-  fields.forEach(f => {
-    if (f.el) {
-      f.el.oninput = () => {
-        item[f.prop] = f.el.value;
-        scheduleAutoSave();
-      };
-    }
-  });
+  setupModalFilesAttachment("learningFormFiles", "learningFormFilesPreview", item);
 
   const form = document.getElementById("learningForm");
   form.onsubmit = (e) => {
     e.preventDefault();
-    flushAutoSave();
+    const titleVal = document.getElementById("learningFormTitle").value.trim();
+    if (!titleVal) {
+      showToast("Ingresa un título para la situación de aprendizaje.", "error");
+      document.getElementById("learningFormTitle").focus();
+      return;
+    }
+
+    item.title = titleVal;
+    item.topicId = document.getElementById("learningFormTopicSelect").value;
+    item.difficulty = document.getElementById("learningFormDifficulty").value;
+    item.uncomprehendedConcept = document.getElementById("learningFormConcept").value;
+    item.strategyUsed = document.getElementById("learningFormStrategy").value;
+    if (resEl) item.helpfulResources = resEl.value;
+    if (whatLearnedEl) item.whatILearned = whatLearnedEl.value;
+    if (verificationEl) item.howIVerified = verificationEl.value;
+    item.personalReflection = document.getElementById("learningFormReflection").value;
+
+    if (isNewLearning) {
+      appDB.learnings.unshift(item);
+    } else {
+      const index = appDB.learnings.findIndex(l => l.id === item.id);
+      if (index >= 0) {
+        appDB.learnings[index] = { ...appDB.learnings[index], ...item };
+      }
+    }
+
+    saveDatabase();
     closeModal("learningModal");
     renderAprendizaje();
     updateNavBadges();
@@ -2167,16 +2416,21 @@ function openLearningModal(learnId = null) {
 // MODAL DE GESTIÓN GENERAL DE TEMAS (CREAR / EDITAR TEMA)
 // ============================================================================
 
+let activeEditingTopic = null;
+let isNewTopic = false;
+
 function openTopicModal(topicId = null) {
   let topic = null;
-  let isNew = false;
-
   if (topicId) {
-    topic = appDB.topics.find(t => t.id === topicId);
+    const existing = appDB.topics.find(t => t.id === topicId);
+    if (existing) {
+      topic = existing;
+      isNewTopic = false;
+    }
   }
 
   if (!topic) {
-    isNew = true;
+    isNewTopic = true;
     topic = {
       id: generateUniqueId("tema"),
       order: appDB.topics.length + 1,
@@ -2189,49 +2443,53 @@ function openTopicModal(topicId = null) {
       metacognition: [],
       evidencias: []
     };
-    appDB.topics.push(topic);
-    scheduleAutoSave(0);
   }
 
-  document.getElementById("topicModalTitle").textContent = isNew ? "Crear Nuevo Tema" : "Editar Información del Tema";
+  activeEditingTopic = topic;
+
+  const existingTopicIndex = isNewTopic ? -1 : appDB.topics.findIndex(t => t.id === topic.id);
+
+  document.getElementById("topicModalTitle").textContent = isNewTopic ? "Crear Nuevo Tema" : "Editar Información del Tema";
   document.getElementById("topicFormId").value = topic.id;
   document.getElementById("topicFormTitle").value = topic.title || "";
-  document.getElementById("topicFormOrder").value = topic.order || 1;
+  document.getElementById("topicFormOrder").value = topic.order || (appDB.topics.length + 1);
   document.getElementById("topicFormStatus").value = topic.status || "Pendiente";
-  document.getElementById("topicFormHours").value = topic.estimatedHours || "";
+  document.getElementById("topicFormHours").value = topic.estimatedHours || "20 horas";
   document.getElementById("topicFormDesc").value = topic.description || "";
-
-  // Guardado en tiempo real
-  const fields = [
-    { id: "topicFormTitle", prop: "title" },
-    { id: "topicFormOrder", prop: "order" },
-    { id: "topicFormStatus", prop: "status" },
-    { id: "topicFormHours", prop: "estimatedHours" },
-    { id: "topicFormDesc", prop: "description" }
-  ];
-
-  fields.forEach(f => {
-    const el = document.getElementById(f.id);
-    if (el) {
-      el.oninput = () => {
-        topic[f.prop] = el.value;
-        scheduleAutoSave();
-      };
-      el.onchange = () => {
-        topic[f.prop] = el.value;
-        scheduleAutoSave();
-      };
-    }
-  });
 
   const form = document.getElementById("topicForm");
   form.onsubmit = (e) => {
     e.preventDefault();
-    flushAutoSave();
+    const titleVal = document.getElementById("topicFormTitle").value.trim();
+    if (!titleVal) {
+      showToast("Ingresa un título para el tema.", "error");
+      document.getElementById("topicFormTitle").focus();
+      return;
+    }
+
+    topic.title = titleVal;
+    topic.order = parseInt(document.getElementById("topicFormOrder").value, 10) || (appDB.topics.length + 1);
+    topic.status = document.getElementById("topicFormStatus").value;
+    topic.estimatedHours = document.getElementById("topicFormHours").value;
+    topic.description = document.getElementById("topicFormDesc").value;
+
+    if (isNewTopic) {
+      appDB.topics.push(topic);
+    } else {
+      const index = appDB.topics.findIndex(t => t.id === topic.id);
+      if (index >= 0) {
+        appDB.topics[index] = { ...appDB.topics[index], ...topic };
+      }
+    }
+
+    saveDatabase();
     closeModal("topicModal");
     renderTemas();
     populateTopicSelects();
     updateNavBadges();
+    if (activeDetailTopicId === topic.id) {
+      renderTopicDetail(topic.id);
+    }
     showToast("✓ Tema guardado correctamente.", "success");
   };
 
@@ -2250,9 +2508,10 @@ function openItemViewerModal(type, itemId) {
     const w = appDB.workshops.find(x => x.id === itemId);
     if (!w) return;
     title = w.title;
+    const topicTitle = w.topicId ? getTopicTitleById(w.topicId) : "";
     contentHTML = `
       <div class="viewer-section">
-        <span class="viewer-tag">TEMA: ${escapeHTML(getTopicTitleById(w.topicId))} · FECHA: ${escapeHTML(w.date || '')}</span>
+        <span class="viewer-tag">${topicTitle ? `TEMA: ${escapeHTML(topicTitle)} · ` : ''}FECHA: ${escapeHTML(w.date || '')}</span>
         <h3 class="viewer-title">${escapeHTML(w.title)}</h3>
       </div>
       <div class="viewer-block">
@@ -2285,20 +2544,45 @@ function openItemViewerModal(type, itemId) {
           <p>${escapeHTML(w.reflection)}</p>
         </div>
       ` : ''}
+      ${w.files && w.files.length > 0 ? `
+        <div class="viewer-block">
+          <h4>Hojas de Trabajo y Archivos Adjuntos:</h4>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${w.files.map(f => `
+              <button class="btn btn-outline btn-sm" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${escapeHTML(f.data)}')">
+                📎 ${escapeHTML(f.name)} (${formatBytes(f.size)})
+              </button>
+            `).join("")}
+          </div>
+        </div>
+      ` : ''}
     `;
   } else if (type === "exam") {
     const e = appDB.exams.find(x => x.id === itemId);
     if (!e) return;
     title = e.title;
+    const topicTitle = e.topicId ? getTopicTitleById(e.topicId) : "";
     contentHTML = `
       <div class="viewer-section">
-        <span class="viewer-tag">EVALUACIÓN · ${escapeHTML(getTopicTitleById(e.topicId))}</span>
+        <span class="viewer-tag">EVALUACIÓN${topicTitle ? ` · ${escapeHTML(topicTitle)}` : ''} · FECHA: ${escapeHTML(e.date || '')}</span>
         <h3 class="viewer-title">${escapeHTML(e.title)}</h3>
       </div>
       <div class="viewer-block">
         <h4>Enunciado Evaluado:</h4>
         <p>${escapeHTML(e.statement)}</p>
       </div>
+      ${e.evaluatedContents ? `
+        <div class="viewer-block">
+          <h4>Contenidos Evaluados:</h4>
+          <p>${escapeHTML(e.evaluatedContents)}</p>
+        </div>
+      ` : ''}
+      ${e.originalProcedure ? `
+        <div class="viewer-block">
+          <h4>Procedimiento Original en el Examen:</h4>
+          <pre class="viewer-pre">${escapeHTML(e.originalProcedure)}</pre>
+        </div>
+      ` : ''}
       <div class="viewer-block warning">
         <h4>Diagnóstico del Error Identificado:</h4>
         <p>${escapeHTML(e.identifiedError)}</p>
@@ -2307,10 +2591,28 @@ function openItemViewerModal(type, itemId) {
         <h4>Solución Correcta Paso a Paso:</h4>
         <pre class="viewer-pre">${escapeHTML(e.correctSolution)}</pre>
       </div>
+      ${e.verification ? `
+        <div class="viewer-block">
+          <h4>Comprobación Física:</h4>
+          <p>${escapeHTML(e.verification)}</p>
+        </div>
+      ` : ''}
       ${e.preventionReflection ? `
         <div class="viewer-block success">
           <h4>Estrategia para evitar el error:</h4>
           <p>${escapeHTML(e.preventionReflection)}</p>
+        </div>
+      ` : ''}
+      ${e.files && e.files.length > 0 ? `
+        <div class="viewer-block">
+          <h4>Archivos y Evaluaciones Adjuntas:</h4>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${e.files.map(f => `
+              <button class="btn btn-outline btn-sm" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${escapeHTML(f.data)}')">
+                📎 ${escapeHTML(f.name)} (${formatBytes(f.size)})
+              </button>
+            `).join("")}
+          </div>
         </div>
       ` : ''}
     `;
@@ -2318,27 +2620,58 @@ function openItemViewerModal(type, itemId) {
     const l = appDB.learnings.find(x => x.id === itemId);
     if (!l) return;
     title = l.title;
+    const topicTitle = l.topicId ? getTopicTitleById(l.topicId) : "";
     contentHTML = `
       <div class="viewer-section">
-        <span class="viewer-tag">METACOGNICIÓN · ${escapeHTML(getTopicTitleById(l.topicId))}</span>
+        <span class="viewer-tag">METACOGNICIÓN${topicTitle ? ` · ${escapeHTML(topicTitle)}` : ''}</span>
         <h3 class="viewer-title">${escapeHTML(l.title)}</h3>
       </div>
       <div class="viewer-block">
         <h4>1. Dificultad Encontrada:</h4>
         <p>${escapeHTML(l.difficulty)}</p>
       </div>
+      ${l.uncomprehendedConcept ? `
+        <div class="viewer-block">
+          <h4>Concepto no comprendido inicialmente:</h4>
+          <p>${escapeHTML(l.uncomprehendedConcept)}</p>
+        </div>
+      ` : ''}
       <div class="viewer-block">
         <h4>2. Estrategia Utilizada:</h4>
         <p>${escapeHTML(l.strategyUsed)}</p>
       </div>
+      ${l.helpfulResources ? `
+        <div class="viewer-block">
+          <h4>Recursos que facilitaron la comprensión:</h4>
+          <p>${escapeHTML(l.helpfulResources)}</p>
+        </div>
+      ` : ''}
       <div class="viewer-block highlight">
         <h4>3. Qué Aprendí:</h4>
         <p>${escapeHTML(l.whatILearned)}</p>
       </div>
+      ${l.howIVerified ? `
+        <div class="viewer-block">
+          <h4>Cómo verifiqué mi aprendizaje:</h4>
+          <p>${escapeHTML(l.howIVerified)}</p>
+        </div>
+      ` : ''}
       ${l.personalReflection ? `
         <div class="viewer-block">
           <h4>Reflexión Personal:</h4>
           <p>${escapeHTML(l.personalReflection)}</p>
+        </div>
+      ` : ''}
+      ${l.files && l.files.length > 0 ? `
+        <div class="viewer-block">
+          <h4>Archivos y Apuntes Adjuntos:</h4>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${l.files.map(f => `
+              <button class="btn btn-outline btn-sm" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${escapeHTML(f.data)}')">
+                📎 ${escapeHTML(f.name)} (${formatBytes(f.size)})
+              </button>
+            `).join("")}
+          </div>
         </div>
       ` : ''}
     `;
@@ -2508,6 +2841,7 @@ function openModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
     modal.classList.add("open");
+    modal.classList.add("active");
     document.body.style.overflow = "hidden";
   }
 }
@@ -2516,7 +2850,11 @@ function closeModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
     modal.classList.remove("open");
-    document.body.style.overflow = "";
+    modal.classList.remove("active");
+    const anyModalOpen = document.querySelector(".modal.open, .modal.active");
+    if (!anyModalOpen) {
+      document.body.style.overflow = "";
+    }
   }
   flushAutoSave();
 }
@@ -2757,6 +3095,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const nameEl = document.getElementById("inputStudentName");
     const univEl = document.getElementById("inputUniversity");
     const careerEl = document.getElementById("inputCareer");
+    const profEl = document.getElementById("inputProfessor");
     const termEl = document.getElementById("inputSemester");
     const bioEl = document.getElementById("inputPresentation");
     const goalsEl = document.getElementById("inputObjectives");
@@ -2764,6 +3103,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (nameEl) nameEl.value = appDB.profile.name || "";
     if (univEl) univEl.value = appDB.profile.university || "";
     if (careerEl) careerEl.value = appDB.profile.career || "";
+    if (profEl) profEl.value = appDB.profile.professor || "";
     if (termEl) termEl.value = appDB.profile.term || "";
     if (bioEl) bioEl.value = appDB.profile.bio || "";
     if (goalsEl) goalsEl.value = appDB.profile.goals || "";
@@ -2773,27 +3113,47 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("sidebarEditProfileBtn")?.addEventListener("click", openProfile);
   document.getElementById("topbarProfileBtn")?.addEventListener("click", openProfile);
+  document.getElementById("editProfileBtn")?.addEventListener("click", openProfile);
 
   document.getElementById("profileForm")?.addEventListener("submit", (e) => {
     e.preventDefault();
     const nameEl = document.getElementById("inputStudentName");
     const univEl = document.getElementById("inputUniversity");
     const careerEl = document.getElementById("inputCareer");
+    const profEl = document.getElementById("inputProfessor");
     const termEl = document.getElementById("inputSemester");
     const bioEl = document.getElementById("inputPresentation");
     const goalsEl = document.getElementById("inputObjectives");
 
-    if (nameEl) appDB.profile.name = nameEl.value;
-    if (univEl) appDB.profile.university = univEl.value;
-    if (careerEl) appDB.profile.career = careerEl.value;
-    if (termEl) appDB.profile.term = termEl.value;
-    if (bioEl) appDB.profile.bio = bioEl.value;
-    if (goalsEl) appDB.profile.goals = goalsEl.value;
+    if (nameEl) appDB.profile.name = nameEl.value.trim() || "Estudiante";
+    if (univEl) appDB.profile.university = univEl.value.trim();
+    if (careerEl) appDB.profile.career = careerEl.value.trim();
+    if (profEl) appDB.profile.professor = profEl.value.trim();
+    if (termEl) appDB.profile.term = termEl.value.trim();
+    if (bioEl) appDB.profile.bio = bioEl.value.trim();
+    if (goalsEl) appDB.profile.goals = goalsEl.value.trim();
 
     saveDatabase();
     updateProfileUI();
     closeModal("profileModal");
     showToast("✓ Perfil actualizado con éxito.", "success");
+  });
+
+  // Cerrar cualquier modal al hacer clic en el backdrop
+  document.querySelectorAll(".modal").forEach(modal => {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) {
+        closeModal(modal.id);
+      }
+    });
+  });
+
+  // Cerrar modal activo con tecla Escape
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      const activeModal = document.querySelector(".modal.open, .modal.active");
+      if (activeModal) closeModal(activeModal.id);
+    }
   });
 
   // Respaldo JSON
