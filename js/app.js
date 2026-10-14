@@ -22,6 +22,51 @@ const STORAGE_KEY_DB = "portafolio_fisica_db_v3";
 const LEGACY_STORAGE_KEY_TOPICS = "portafolio_fisica_topics_v2";
 const LEGACY_STORAGE_KEY_PROFILE = "portafolio_fisica_profile_v2";
 
+function createEmptyDatabase() {
+  return {
+    version: 3,
+    profile: {
+      name: "",
+      career: "",
+      university: "",
+      professor: "",
+      term: "",
+      bio: "",
+      goals: ""
+    },
+    topics: [],
+    practiceFiles: [],
+    workshops: [],
+    exams: [],
+    learnings: []
+  };
+}
+
+function sanitizePortfolioDatabase(data) {
+  const base = createEmptyDatabase();
+  const source = data && typeof data === "object" ? data : {};
+
+  return {
+    version: 3,
+    profile: {
+      ...base.profile,
+      ...(source.profile && typeof source.profile === "object" ? source.profile : {})
+    },
+    topics: Array.isArray(source.topics) ? source.topics.filter(Boolean) : [],
+    practiceFiles: Array.isArray(source.practiceFiles) ? source.practiceFiles.filter(Boolean) : [],
+    workshops: Array.isArray(source.workshops) ? source.workshops.filter(Boolean) : [],
+    exams: Array.isArray(source.exams) ? source.exams.filter(Boolean) : [],
+    learnings: Array.isArray(source.learnings) ? source.learnings.filter(Boolean) : []
+  };
+}
+
+function resolveBootstrapDatabase() {
+  if (typeof window !== "undefined" && window.PORTAFOLIO_SEED) {
+    return sanitizePortfolioDatabase(window.PORTAFOLIO_SEED);
+  }
+  return createEmptyDatabase();
+}
+
 // ============================================================================
 // ALMACENAMIENTO BINARIO CON INDEXEDDB (FileStorage)
 // Permite guardar imágenes y PDFs de cualquier tamaño sin saturar LocalStorage
@@ -666,10 +711,14 @@ function migrateLegacyStorageIfNeeded() {
   const legacyProfileRaw = localStorage.getItem(LEGACY_STORAGE_KEY_PROFILE);
   const legacyTopicsRaw = localStorage.getItem(LEGACY_STORAGE_KEY_TOPICS);
 
-  if (!legacyProfileRaw && !legacyTopicsRaw) return false;
+  if (!legacyProfileRaw && !legacyTopicsRaw) {
+    const emptySeed = resolveBootstrapDatabase();
+    localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(emptySeed));
+    return true;
+  }
 
   try {
-    const migrated = structuredClone(DEFAULT_DB);
+    const migrated = sanitizePortfolioDatabase(DEFAULT_DB);
     const legacyProfile = legacyProfileRaw ? JSON.parse(legacyProfileRaw) : null;
     const legacyTopics = legacyTopicsRaw ? JSON.parse(legacyTopicsRaw) : [];
 
@@ -694,6 +743,8 @@ function migrateLegacyStorageIfNeeded() {
     return true;
   } catch (err) {
     console.warn("No fue posible migrar datos antiguos de LocalStorage:", err);
+    const emptySeed = resolveBootstrapDatabase();
+    localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(emptySeed));
     return false;
   }
 }
@@ -704,126 +755,21 @@ function loadDatabase() {
     const raw = localStorage.getItem(STORAGE_KEY_DB);
     if (raw) {
       const parsed = JSON.parse(raw);
-      parsed.profile = parsed.profile || structuredClone(DEFAULT_DB.profile);
-      parsed.topics = Array.isArray(parsed.topics) ? parsed.topics : structuredClone(DEFAULT_DB.topics);
-      parsed.practiceFiles = Array.isArray(parsed.practiceFiles) ? parsed.practiceFiles : structuredClone(DEFAULT_DB.practiceFiles);
-      parsed.workshops = Array.isArray(parsed.workshops) ? parsed.workshops : structuredClone(DEFAULT_DB.workshops);
-      parsed.exams = Array.isArray(parsed.exams) ? parsed.exams : structuredClone(DEFAULT_DB.exams);
-      parsed.learnings = Array.isArray(parsed.learnings) ? parsed.learnings : structuredClone(DEFAULT_DB.learnings);
-
-      // Limpieza segura de registros fantasma vacíos causados por unshifts previos
-      parsed.workshops = parsed.workshops.filter(w => {
-        return Boolean((w.title && w.title.trim()) || (w.statement && w.statement.trim()) || (w.stepByStep && w.stepByStep.trim()) || (w.finalAnswer && w.finalAnswer.trim()));
-      });
-      if (parsed.workshops.length === 0) {
-        parsed.workshops = structuredClone(DEFAULT_DB.workshops);
+      const normalized = sanitizePortfolioDatabase(parsed);
+      if (!normalized.profile.name && !normalized.profile.career && !normalized.profile.university && !normalized.profile.professor && !normalized.profile.term && normalized.topics.length === 0 && normalized.workshops.length === 0 && normalized.exams.length === 0 && normalized.learnings.length === 0 && normalized.practiceFiles.length === 0) {
+        const seed = resolveBootstrapDatabase();
+        localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(seed));
+        return seed;
       }
-
-      parsed.exams = parsed.exams.filter(e => {
-        return Boolean((e.title && e.title.trim()) || (e.statement && e.statement.trim()) || (e.correctSolution && e.correctSolution.trim()));
-      });
-      if (parsed.exams.length === 0) {
-        parsed.exams = structuredClone(DEFAULT_DB.exams);
-      }
-
-      parsed.learnings = parsed.learnings.filter(l => {
-        return Boolean((l.title && l.title.trim()) || (l.difficulty && l.difficulty.trim()) || (l.whatILearned && l.whatILearned.trim()));
-      });
-      if (parsed.learnings.length === 0) {
-        parsed.learnings = structuredClone(DEFAULT_DB.learnings);
-      }
-
-      // Normalizar y sanear estructura de cada tema a las 4 secciones solicitadas
-      parsed.topics = parsed.topics.filter(t => Boolean(t.title && t.title.trim()));
-      if (parsed.topics.length === 0) {
-        parsed.topics = structuredClone(DEFAULT_DB.topics);
-      }
-
-      parsed.topics.forEach((t) => {
-        // 1. Definiciones
-        if (Array.isArray(t.definitions)) {
-          t.definitions = t.definitions
-            .map(d => ({
-              id: d.id || generateUniqueId("card_def"),
-              title: d.title || d.term || "",
-              text: d.text || d.definition || "",
-              imageData: d.imageData || null,
-              imageFileId: d.imageFileId || null,
-              imageName: d.imageName || null
-            }))
-            .filter(d => Boolean((d.title && d.title.trim()) || (d.text && d.text.trim()) || d.imageData));
-        } else {
-          t.definitions = [];
-        }
-
-        // Si las definiciones de tema-vectores quedaron vacías por fantasmas, recuperar las 5 predeterminadas
-        if (t.id === "tema-vectores" && t.definitions.length === 0) {
-          const defaultVec = DEFAULT_DB.topics.find(x => x.id === "tema-vectores");
-          if (defaultVec) t.definitions = structuredClone(defaultVec.definitions);
-        }
-
-        // 2. Fórmulas
-        if (Array.isArray(t.formulas)) {
-          t.formulas = t.formulas
-            .map(f => ({
-              id: f.id || generateUniqueId("card_form"),
-              title: f.title || f.name || "",
-              latex: f.latex || "",
-              text: f.text || [f.variables, f.conditions, f.example].filter(Boolean).join("\n") || "",
-              imageData: f.imageData || null,
-              imageFileId: f.imageFileId || null,
-              imageName: f.imageName || null
-            }))
-            .filter(f => Boolean((f.title && f.title.trim()) || (f.text && f.text.trim()) || (f.latex && f.latex.trim()) || f.imageData));
-        } else {
-          t.formulas = [];
-        }
-
-        // 3. Metacognición
-        if (Array.isArray(t.metacognition)) {
-          t.metacognition = t.metacognition.filter(m => Boolean((m.title && m.title.trim()) || (m.text && m.text.trim()) || m.imageData));
-        } else {
-          t.metacognition = [];
-          if (Array.isArray(parsed.learnings)) {
-            const topicLearnings = parsed.learnings.filter(l => l.topicId === t.id);
-            topicLearnings.forEach(l => {
-              t.metacognition.push({
-                id: generateUniqueId("card_meta"),
-                title: l.title || "Reflexión Metacognitiva",
-                text: l.difficulty ? `Dificultad: ${l.difficulty}\n\nEstrategia: ${l.strategyUsed || ''}\n\nQué aprendí: ${l.whatILearned || ''}` : (l.text || ""),
-                imageData: null
-              });
-            });
-          }
-        }
-
-        // 4. Evidencias
-        if (Array.isArray(t.evidencias)) {
-          t.evidencias = t.evidencias.filter(ev => Boolean((ev.title && ev.title.trim()) || (ev.text && ev.text.trim()) || ev.imageData));
-        } else {
-          t.evidencias = [];
-          if (t.mapFile && t.mapFile.data) {
-            t.evidencias.push({
-              id: generateUniqueId("card_evi"),
-              title: "Mapa Conceptual",
-              text: t.conceptualScheme || "",
-              imageData: t.mapFile.data,
-              imageName: t.mapFile.name || "mapa.svg"
-            });
-          }
-        }
-      });
-
-      return parsed;
+      return normalized;
     }
 
-    // Inicializar con DEFAULT_DB
-    const initial = structuredClone(DEFAULT_DB);
+    const initial = resolveBootstrapDatabase();
     localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(initial));
     return initial;
   } catch (err) {
     console.error("Error al cargar la base de datos:", err);
-    return structuredClone(DEFAULT_DB);
+    return createEmptyDatabase();
   }
 }
 
@@ -2710,6 +2656,16 @@ function confirmDelete(type, id, extra = null) {
 
 function executeDelete() {
   if (!currentConfirmAction) return;
+
+  if (currentConfirmAction.type === "custom") {
+    if (typeof currentConfirmAction.callback === "function") {
+      currentConfirmAction.callback();
+    }
+    closeModal("confirmModal");
+    currentConfirmAction = null;
+    return;
+  }
+
   const { type, id, extra } = currentConfirmAction;
 
   if (type === "topic") {
@@ -2923,29 +2879,30 @@ function importBackupJSON(file) {
   reader.readAsText(file);
 }
 
+function openCustomConfirmDialog(message, onAccept) {
+  currentConfirmAction = { type: "custom", callback: onAccept };
+  const promptEl = document.getElementById("confirmModalMessage");
+  if (promptEl) promptEl.textContent = message;
+  openModal("confirmModal");
+}
+
 function restoreDefaultData() {
-  if (confirm("¿Deseas restablecer los contenidos académicos de ejemplo? Se mantendrá guardado.")) {
-    appDB = structuredClone(DEFAULT_DB);
+  openCustomConfirmDialog("Esto reemplaza todo tu trabajo actual. ¿Deseas cargar los datos de ejemplo?", () => {
+    const demoData = (typeof window !== "undefined" && window.PORTAFOLIO_DEMO_DATA) ? window.PORTAFOLIO_DEMO_DATA : createEmptyDatabase();
+    appDB = sanitizePortfolioDatabase(demoData);
     saveDatabase();
     renderApp();
-    showToast("✓ Datos de ejemplo restaurados.", "success");
-  }
+    showToast("✓ Datos de ejemplo cargados.", "success");
+  });
 }
 
 function clearAllData() {
-  if (confirm("¿Estás seguro de que deseas borrar TODOS los registros? Se vaciarán los temas y actividades.")) {
-    appDB = {
-      profile: structuredClone(DEFAULT_DB.profile),
-      topics: [],
-      practiceFiles: [],
-      workshops: [],
-      exams: [],
-      learnings: []
-    };
+  openCustomConfirmDialog("Esto elimina todos los datos guardados en este navegador. ¿Deseas continuar?", () => {
+    appDB = createEmptyDatabase();
     saveDatabase();
     renderApp();
     showToast("Todos los datos han sido borrados.", "info");
-  }
+  });
 }
 
 // ============================================================================
@@ -3171,6 +3128,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("restoreDefaultsBtn")?.addEventListener("click", restoreDefaultData);
   document.getElementById("clearAllDataBtn")?.addEventListener("click", clearAllData);
+  document.getElementById("loadDemoDataBtn")?.addEventListener("click", restoreDefaultData);
 
   // Renderizar la app completa
   renderApp();

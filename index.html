@@ -123,6 +123,10 @@
         Importar JSON
         <input type="file" id="sidebarImportFile" accept=".json,application/json">
       </label>
+      <button class="btn btn-ghost btn-full btn-sm" id="loadDemoDataBtn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>
+        Cargar datos de ejemplo
+      </button>
     </div>
   </aside>
 
@@ -1303,6 +1307,10 @@
 
   <!-- Notificaciones Toast -->
   <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Semilla vacía y datos de demostración opcionales -->
+  <script src="js/seed.js"></script>
+  <script src="js/demo-data.js"></script>
 
   <!-- Script principal de la aplicación -->
   <script src="js/app.js?v=4.0"></script>
