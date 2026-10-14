@@ -2394,8 +2394,8 @@ function renderParciales() {
   let filtered = appDB.exams.filter(e => {
     const matchSearch = !filters.examsSearch ||
       (e.title && e.title.toLowerCase().includes(filters.examsSearch.toLowerCase())) ||
-      (e.statement && e.statement.toLowerCase().includes(filters.examsSearch.toLowerCase())) ||
-      (e.identifiedError && e.identifiedError.toLowerCase().includes(filters.examsSearch.toLowerCase()));
+      (e.evaluatedContents && e.evaluatedContents.toLowerCase().includes(filters.examsSearch.toLowerCase())) ||
+      (e.preventionReflection && e.preventionReflection.toLowerCase().includes(filters.examsSearch.toLowerCase()));
     const matchTopic = filters.examsTopic === "all" || e.topicId === filters.examsTopic;
     return matchSearch && matchTopic;
   });
@@ -2415,12 +2415,8 @@ function renderParciales() {
         </div>
         ${topicTitle ? `<div class="activity-card-topic">${escapeHTML(topicTitle)}</div>` : ''}
         <h3 class="activity-card-title">${escapeHTML(e.title)}</h3>
-        <p class="activity-card-snippet">${escapeHTML(e.statement || "")}</p>
-        ${e.identifiedError ? `
-          <div class="activity-card-warning">
-            <strong>⚠ Error diagnosticado:</strong> ${escapeHTML(e.identifiedError)}
-          </div>
-        ` : ''}
+        ${e.evaluatedContents ? `<p class="activity-card-snippet"><strong>Contenidos:</strong> ${escapeHTML(e.evaluatedContents)}</p>` : ''}
+        ${e.preventionReflection ? `<p class="activity-card-snippet">${escapeHTML(e.preventionReflection)}</p>` : ''}
         <div class="activity-card-footer">
           <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('exam', '${escapeHTML(e.id)}')">
             Ver corrección
@@ -2461,11 +2457,6 @@ function openExamModal(examId = null) {
       title: "",
       date: new Date().toISOString().slice(0, 10),
       evaluatedContents: "",
-      statement: "",
-      originalProcedure: "",
-      identifiedError: "",
-      correctSolution: "",
-      verification: "",
       preventionReflection: "",
       files: []
     };
@@ -2481,11 +2472,6 @@ function openExamModal(examId = null) {
   document.getElementById("examFormDate").value = item.date || new Date().toISOString().slice(0, 10);
   document.getElementById("examFormTopicSelect").value = item.topicId || "";
   document.getElementById("examFormContents").value = item.evaluatedContents || "";
-  document.getElementById("examFormStatement").value = item.statement || "";
-  document.getElementById("examFormOriginal").value = item.originalProcedure || "";
-  document.getElementById("examFormError").value = item.identifiedError || "";
-  document.getElementById("examFormCorrectSolution").value = item.correctSolution || "";
-  document.getElementById("examFormVerification").value = item.verification || "";
   document.getElementById("examFormReflection").value = item.preventionReflection || "";
 
   setupModalFilesAttachment("examFormFiles", "examFormFilesPreview", item);
@@ -2499,17 +2485,18 @@ function openExamModal(examId = null) {
       document.getElementById("examFormTitle").focus();
       return;
     }
+    const reflectionVal = document.getElementById("examFormReflection").value.trim();
+    if (!reflectionVal) {
+      showToast("Ingresa una reflexión sobre lo aprendido y los temas que necesitas reforzar.", "error");
+      document.getElementById("examFormReflection").focus();
+      return;
+    }
 
     item.title = titleVal;
     item.date = document.getElementById("examFormDate").value;
     item.topicId = document.getElementById("examFormTopicSelect").value;
     item.evaluatedContents = document.getElementById("examFormContents").value;
-    item.statement = document.getElementById("examFormStatement").value;
-    item.originalProcedure = document.getElementById("examFormOriginal").value;
-    item.identifiedError = document.getElementById("examFormError").value;
-    item.correctSolution = document.getElementById("examFormCorrectSolution").value;
-    item.verification = document.getElementById("examFormVerification").value;
-    item.preventionReflection = document.getElementById("examFormReflection").value;
+    item.preventionReflection = reflectionVal;
 
     if (isNewExam) {
       appDB.exams.unshift(item);
@@ -2803,34 +2790,10 @@ function openItemViewerModal(type, itemId) {
         <span class="viewer-tag">EVALUACIÓN${topicTitle ? ` · ${escapeHTML(topicTitle)}` : ''} · FECHA: ${escapeHTML(e.date || '')}</span>
         <h3 class="viewer-title">${escapeHTML(e.title)}</h3>
       </div>
-      <div class="viewer-block">
-        <h4>Enunciado Evaluado:</h4>
-        <p>${escapeHTML(e.statement)}</p>
-      </div>
       ${e.evaluatedContents ? `
         <div class="viewer-block">
           <h4>Contenidos Evaluados:</h4>
           <p>${escapeHTML(e.evaluatedContents)}</p>
-        </div>
-      ` : ''}
-      ${e.originalProcedure ? `
-        <div class="viewer-block">
-          <h4>Procedimiento Original en el Examen:</h4>
-          <pre class="viewer-pre">${escapeHTML(e.originalProcedure)}</pre>
-        </div>
-      ` : ''}
-      <div class="viewer-block warning">
-        <h4>Diagnóstico del Error Identificado:</h4>
-        <p>${escapeHTML(e.identifiedError)}</p>
-      </div>
-      <div class="viewer-block">
-        <h4>Solución Correcta Paso a Paso:</h4>
-        <pre class="viewer-pre">${escapeHTML(e.correctSolution)}</pre>
-      </div>
-      ${e.verification ? `
-        <div class="viewer-block">
-          <h4>Comprobación Física:</h4>
-          <p>${escapeHTML(e.verification)}</p>
         </div>
       ` : ''}
       ${e.preventionReflection ? `
