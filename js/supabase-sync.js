@@ -164,9 +164,20 @@
           return false;
         }
 
-        if (data && data.data) {
+        if (data && data.data && typeof data.data === "object") {
           const remoteData = data.data;
-          // Si hay datos remotos válidos, integrarlos
+          const hasRemoteContent = (remoteData.topics && remoteData.topics.length > 0) ||
+                                   (remoteData.profile && remoteData.profile.name);
+          const hasLocalContent = (window.appDB && window.appDB.topics && window.appDB.topics.length > 0) ||
+                                  (window.appDB && window.appDB.profile && window.appDB.profile.name);
+
+          // Si en la nube no hay contenido real pero en local sí, subimos el contenido local
+          if (!hasRemoteContent && hasLocalContent) {
+            console.info("La nube no contiene temas aún; subiendo datos locales...");
+            await this.pushDataNow(window.appDB);
+            return true;
+          }
+
           if (typeof window.sanitizePortfolioDatabase === "function") {
             window.appDB = window.sanitizePortfolioDatabase(remoteData);
           } else {

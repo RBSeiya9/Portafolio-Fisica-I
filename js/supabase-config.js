@@ -5,6 +5,6 @@
  * ingresarlas desde la interfaz web en "Respaldo y datos" -> "Sincronización en la Nube".
  */
 window.SUPABASE_CONFIG = {
-  url: "",
-  anonKey: ""
+  url: "https://udlebftkmenpgqyplaqk.supabase.co",
+  anonKey: "sb_publishable_6HWsg7zFTgYYNMidyFza7Q_kkC9GgG1"
 };
