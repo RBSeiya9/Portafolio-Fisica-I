@@ -2,6 +2,7 @@ const fs = require('fs');
 const vm = require('vm');
 
 const source = fs.readFileSync('js/app.js', 'utf8');
+const html = fs.readFileSync('index.html', 'utf8');
 const start = source.indexOf('function isSafeAssetUrl');
 const end = source.indexOf('function formatBytes');
 
@@ -25,6 +26,12 @@ if (pdfResult !== pdfDataUrl) {
 
 if (imageResult !== imageDataUrl) {
   throw new Error(`Image preview should keep the original data URL. Got: ${imageResult}`);
+}
+
+const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/i)?.[1] || '';
+const objectSource = csp.match(/(?:^|;\s*)object-src\s+([^;]+)/i)?.[1] || '';
+if (!objectSource.split(/\s+/).includes('data:')) {
+  throw new Error('Content Security Policy must allow data: URLs for embedded PDF previews');
 }
 
 console.log('PDF preview test passed');
