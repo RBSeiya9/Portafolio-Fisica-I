@@ -2157,6 +2157,15 @@ textarea {
 }
 
 /* Cajas de subida de archivos */
+#workshopFormFiles,
+#workshopFormFilesPreview,
+#examFormFiles,
+#examFormFilesPreview,
+#learningFormFiles,
+#learningFormFilesPreview {
+  display: none !important;
+}
+
 .file-uploader-box {
   position: relative;
   border: 2px dashed var(--color-border);

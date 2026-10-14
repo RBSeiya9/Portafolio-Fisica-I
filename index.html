@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: https://fonts.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://cdn.jsdelivr.net data:; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net; media-src 'self' blob:; object-src 'self' blob:; frame-src 'self' blob:; base-uri 'self'; form-action 'self';">
   <meta name="description" content="Portafolio Digital interactivo y académico de Física I. Organización de temas, definiciones, fórmulas matemáticas con KaTeX, prácticas de laboratorio, talleres evaluativos, parciales corregidos y metacognición.">
   <title>Portafolio Digital de Física I | Plataforma Académica</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>Φ</text></svg>">
@@ -503,7 +504,7 @@
           <div class="empty-icon">📝</div>
           <h3>No se encontraron talleres</h3>
           <p>Aún no hay talleres registrados bajo este criterio.</p>
-          <button class="btn btn-primary btn-sm" onclick="openWorkshopModal()">Registrar primer taller</button>
+          <button class="btn btn-primary btn-sm" data-action="open-workshop-modal">Registrar primer taller</button>
         </div>
       </section>
 
@@ -546,7 +547,7 @@
           <div class="empty-icon">🎯</div>
           <h3>No se encontraron evaluaciones</h3>
           <p>No hay exámenes o correcciones registradas para este filtro.</p>
-          <button class="btn btn-primary btn-sm" onclick="openExamModal()">Registrar primer parcial</button>
+          <button class="btn btn-primary btn-sm" data-action="open-exam-modal">Registrar primer parcial</button>
         </div>
       </section>
 
@@ -589,7 +590,7 @@
           <div class="empty-icon">✦</div>
           <h3>No se encontraron situaciones de aprendizaje</h3>
           <p>Registra las dificultades que enfrentaste en algún tema y la estrategia que te permitió superarlas.</p>
-          <button class="btn btn-primary btn-sm" onclick="openLearningModal()">Registrar primera situación</button>
+          <button class="btn btn-primary btn-sm" data-action="open-learning-modal">Registrar primera situación</button>
         </div>
       </section>
 
@@ -738,7 +739,7 @@
             <span class="step-badge">▤</span>
             <h3 id="topicModalTitle">Registrar Tema Académico</h3>
           </div>
-          <button class="modal-close-btn" onclick="closeModal('topicModal')" aria-label="Cerrar">✕</button>
+          <button class="modal-close-btn" data-close-modal="topicModal" aria-label="Cerrar">✕</button>
         </div>
         <form id="topicForm" class="modal-form" novalidate>
           <input type="hidden" id="topicFormId">
@@ -793,7 +794,7 @@
             </div>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeModal('topicModal')">Cancelar</button>
+            <button type="button" class="btn btn-outline" data-close-modal="topicModal">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btnSubmitTopicForm">Guardar Tema</button>
           </div>
         </form>
@@ -812,7 +813,7 @@
           </div>
           <div style="display: flex; align-items: center; gap: 10px;">
             <span class="modal-autosave-badge saved" id="cardEditorAutosaveStatus">✓ Guardado</span>
-            <button class="modal-close-btn" onclick="closeModal('cardEditorModal')" aria-label="Cerrar">✕</button>
+            <button class="modal-close-btn" data-close-modal="cardEditorModal" aria-label="Cerrar">✕</button>
           </div>
         </div>
 
@@ -836,14 +837,14 @@
                 Expresión Matemática / Fórmula LaTeX <span class="text-muted" style="font-weight: normal; font-size: 12px;">(Opcional)</span>
               </label>
               <div class="formula-helper-tags">
-                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\vec{r} = x\\hat{i} + y\\hat{j}')">\vec{r}</button>
-                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\sum \\vec{F} = m \\vec{a}')">\sum F=ma</button>
-                <button type="button" class="formula-chip" onclick="insertLatexSnippet('v_f^2 = v_0^2 + 2a\\Delta x')">v_f^2</button>
-                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\Delta x')">\Delta x</button>
-                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\frac{a}{b}')">\frac{a}{b}</button>
-                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\sqrt{x}')">\sqrt{x}</button>
-                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\theta')">\theta</button>
-                <button type="button" class="formula-chip" onclick="insertLatexSnippet('\\mu_k')">\mu_k</button>
+                <button type="button" class="formula-chip" data-latex="\\vec{r} = x\\hat{i} + y\\hat{j}">\vec{r}</button>
+                <button type="button" class="formula-chip" data-latex="\\sum \\vec{F} = m \\vec{a}">\sum F=ma</button>
+                <button type="button" class="formula-chip" data-latex="v_f^2 = v_0^2 + 2a\\Delta x">v_f^2</button>
+                <button type="button" class="formula-chip" data-latex="\\Delta x">\Delta x</button>
+                <button type="button" class="formula-chip" data-latex="\\frac{a}{b}">\frac{a}{b}</button>
+                <button type="button" class="formula-chip" data-latex="\\sqrt{x}">\sqrt{x}</button>
+                <button type="button" class="formula-chip" data-latex="\\theta">\theta</button>
+                <button type="button" class="formula-chip" data-latex="\\mu_k">\mu_k</button>
               </div>
               <input type="text" id="cardEditorLatex" placeholder="Ej. \vec{A} \cdot \vec{B} = |A||B|\cos(\theta)">
               <div class="katex-live-box" style="margin-top: 8px;">
@@ -905,10 +906,10 @@
             <button type="button" class="btn btn-danger-outline" id="cardEditorDeleteBtn">
               🗑 Eliminar tarjeta
             </button>
-            <button type="button" class="btn btn-outline" onclick="closeModal('cardEditorModal')">
+            <button type="button" class="btn btn-outline" data-close-modal="cardEditorModal">
               Cancelar
             </button>
-            <button type="button" class="btn btn-primary" onclick="saveCardEditorChanges()">
+            <button type="button" class="btn btn-primary" data-action="save-card-editor">
               Listo ✓
             </button>
           </div>
@@ -928,7 +929,7 @@
           </div>
           <div style="display: flex; align-items: center; gap: 10px;">
             <span class="modal-autosave-badge saved" id="workshopAutosaveStatus">✓ Guardado</span>
-            <button class="modal-close-btn" onclick="closeModal('workshopModal')" aria-label="Cerrar">✕</button>
+            <button class="modal-close-btn" data-close-modal="workshopModal" aria-label="Cerrar">✕</button>
           </div>
         </div>
         <form id="workshopForm" class="modal-form" novalidate>
@@ -1001,7 +1002,7 @@
             </div>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeModal('workshopModal')">Cancelar</button>
+            <button type="button" class="btn btn-outline" data-close-modal="workshopModal">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btnSubmitWorkshopForm">Guardar Taller</button>
           </div>
         </form>
@@ -1020,7 +1021,7 @@
           </div>
           <div style="display: flex; align-items: center; gap: 10px;">
             <span class="modal-autosave-badge saved" id="examAutosaveStatus">✓ Guardado</span>
-            <button class="modal-close-btn" onclick="closeModal('examModal')" aria-label="Cerrar">✕</button>
+            <button class="modal-close-btn" data-close-modal="examModal" aria-label="Cerrar">✕</button>
           </div>
         </div>
         <form id="examForm" class="modal-form" novalidate>
@@ -1098,7 +1099,7 @@
             </div>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeModal('examModal')">Cancelar</button>
+            <button type="button" class="btn btn-outline" data-close-modal="examModal">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btnSubmitExamForm">Guardar Parcial</button>
           </div>
         </form>
@@ -1117,7 +1118,7 @@
           </div>
           <div style="display: flex; align-items: center; gap: 10px;">
             <span class="modal-autosave-badge saved" id="learningAutosaveStatus">✓ Guardado</span>
-            <button class="modal-close-btn" onclick="closeModal('learningModal')" aria-label="Cerrar">✕</button>
+            <button class="modal-close-btn" data-close-modal="learningModal" aria-label="Cerrar">✕</button>
           </div>
         </div>
         <form id="learningForm" class="modal-form" novalidate>
@@ -1184,7 +1185,7 @@
             </div>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeModal('learningModal')">Cancelar</button>
+            <button type="button" class="btn btn-outline" data-close-modal="learningModal">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btnSubmitLearningForm">Guardar Situación</button>
           </div>
         </form>
@@ -1201,13 +1202,13 @@
             <span class="step-badge" id="itemViewerBadge">📄</span>
             <h3 id="itemViewerTitle">Detalle de Actividad</h3>
           </div>
-          <button class="modal-close-btn" onclick="closeModal('itemViewerModal')" aria-label="Cerrar">✕</button>
+          <button class="modal-close-btn" data-close-modal="itemViewerModal" aria-label="Cerrar">✕</button>
         </div>
         <div class="modal-body" id="itemViewerBody">
           <!-- Contenido renderizado dinámicamente -->
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-primary" onclick="closeModal('itemViewerModal')">Cerrar</button>
+          <button type="button" class="btn btn-primary" data-close-modal="itemViewerModal">Cerrar</button>
         </div>
       </div>
     </div>
@@ -1222,7 +1223,7 @@
             <span class="step-badge">🎓</span>
             <h3 id="profileModalTitle">Editar Datos Académicos</h3>
           </div>
-          <button class="modal-close-btn" onclick="closeModal('profileModal')" aria-label="Cerrar">✕</button>
+          <button class="modal-close-btn" data-close-modal="profileModal" aria-label="Cerrar">✕</button>
         </div>
         <form id="profileForm" class="modal-form" novalidate>
           <div class="modal-body">
@@ -1260,7 +1261,7 @@
             </div>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeModal('profileModal')">Cancelar</button>
+            <button type="button" class="btn btn-outline" data-close-modal="profileModal">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btnSubmitProfileForm">Guardar Datos</button>
           </div>
         </form>
@@ -1274,13 +1275,13 @@
       <div class="modal-content">
         <div class="modal-header">
           <h3 id="confirmModalTitle">Confirmación Requerida</h3>
-          <button class="modal-close-btn" onclick="closeConfirmDialog()" aria-label="Cerrar">✕</button>
+          <button class="modal-close-btn" data-close-confirm aria-label="Cerrar">✕</button>
         </div>
         <div class="modal-body">
           <p id="confirmModalMessage">¿Estás seguro de continuar con esta acción?</p>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-outline" id="confirmModalCancelBtn" onclick="closeConfirmDialog()">Cancelar</button>
+          <button type="button" class="btn btn-outline" id="confirmModalCancelBtn" data-close-confirm>Cancelar</button>
           <button type="button" class="btn btn-danger" id="confirmModalAcceptBtn">Confirmar</button>
         </div>
       </div>
@@ -1295,7 +1296,7 @@
           <h3 id="fileViewerTitle">Vista Previa de Evidencia</h3>
           <div class="file-viewer-actions">
             <a href="#" id="fileViewerDownloadBtn" download class="btn btn-sm btn-outline">Descargar</a>
-            <button class="modal-close-btn" onclick="closeFileViewer()" aria-label="Cerrar">✕</button>
+            <button class="modal-close-btn" data-close-file-viewer aria-label="Cerrar">✕</button>
           </div>
         </div>
         <div class="modal-body file-viewer-body" id="fileViewerBody">

@@ -197,6 +197,27 @@ function escapeHTML(str = "") {
     .replace(/'/g, "&#039;");
 }
 
+function sanitizeImportedId(value) {
+  if (typeof value !== "string") return "";
+  return value.trim().match(/^[\w-]+$/) ? value.trim() : "";
+}
+
+function isSafeAssetUrl(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("blob:")) return true;
+  if (/^data:image\/(png|jpeg|webp);base64,/i.test(trimmed)) return true;
+  if (/^assets\//i.test(trimmed)) return true;
+  return false;
+}
+
+function safeObjectUrl(data, fallback = "") {
+  if (!data || typeof data !== "string") return fallback;
+  if (isSafeAssetUrl(data)) return data;
+  return fallback;
+}
+
 function formatBytes(bytes) {
   if (!bytes || isNaN(bytes)) return "0 KB";
   if (bytes < 1024) return bytes + " B";
@@ -1926,6 +1947,15 @@ function setupModalFilesAttachment(inputElId, previewElId, item) {
   const preview = document.getElementById(previewElId);
   if (!input || !preview || !item) return;
 
+  if (["workshopFormFiles", "examFormFiles", "learningFormFiles"].includes(inputElId)) {
+    const box = input.closest(".file-uploader-box");
+    const formGroup = input.closest(".form-group");
+    if (box) box.style.display = "none";
+    if (formGroup) formGroup.style.display = "none";
+    if (preview) preview.style.display = "none";
+    return;
+  }
+
   if (!Array.isArray(item.files)) item.files = [];
 
   const renderPreviews = () => {
@@ -2711,7 +2741,8 @@ function executeDelete() {
 // ============================================================================
 
 function openFileViewer(name, type, data) {
-  if (!data) {
+  const safeValue = safeObjectUrl(data, "");
+  if (!safeValue) {
     showToast("No hay vista previa disponible para este archivo.", "info");
     return;
   }
@@ -2723,10 +2754,10 @@ function openFileViewer(name, type, data) {
   if (isPdf) {
     body.innerHTML = `
       <div style="height: 60vh; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px;">
-        <object data="${data}" type="application/pdf" width="100%" height="100%">
+        <object data="${safeValue}" type="application/pdf" width="100%" height="100%">
           <div style="text-align: center; padding: 30px;">
             <p>Tu navegador no admite visualización directa embebida del PDF.</p>
-            <a href="${data}" target="_blank" class="btn btn-primary">Abrir PDF en pestaña nueva</a>
+            <a href="${safeValue}" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Abrir PDF en pestaña nueva</a>
           </div>
         </object>
       </div>
@@ -2734,14 +2765,19 @@ function openFileViewer(name, type, data) {
   } else {
     body.innerHTML = `
       <div style="display: flex; justify-content: center; align-items: center; max-height: 70vh; overflow: auto;">
-        <img src="${data}" alt="${escapeHTML(name)}" style="max-width: 100%; max-height: 68vh; object-fit: contain; border-radius: 8px;">
+        <img src="${safeValue}" alt="${escapeHTML(name)}" style="max-width: 100%; max-height: 68vh; object-fit: contain; border-radius: 8px;">
       </div>
     `;
   }
 
   const downloadBtn = document.getElementById("fileViewerDownloadBtn");
   if (downloadBtn) {
-    downloadBtn.onclick = () => downloadFileDirectly(name, data);
+    downloadBtn.href = safeValue;
+    downloadBtn.setAttribute("download", String(name || "archivo"));
+    downloadBtn.onclick = (event) => {
+      event.preventDefault();
+      downloadFileDirectly(name, safeValue);
+    };
   }
 
   openModal("fileViewerModal");
@@ -2845,32 +2881,78 @@ async function exportBackupJSON() {
   showToast("✓ Copia de seguridad exportada con éxito.", "success");
 }
 
+function validateImportedPayload(data) {
+  if (!data || typeof data !== "object") return null;
+
+  const candidate = data.db || data;
+  if (!candidate || typeof candidate !== "object") return null;
+  const version = Number(candidate.version || 3);
+  if (!Number.isFinite(version) || version < 3) return null;
+
+  const profile = candidate.profile && typeof candidate.profile === "object" ? candidate.profile : {};
+  const topics = Array.isArray(candidate.topics) ? candidate.topics : [];
+  const practiceFiles = Array.isArray(candidate.practiceFiles) ? candidate.practiceFiles : [];
+  const workshops = Array.isArray(candidate.workshops) ? candidate.workshops : [];
+  const exams = Array.isArray(candidate.exams) ? candidate.exams : [];
+  const learnings = Array.isArray(candidate.learnings) ? candidate.learnings : [];
+
+  if (!profile && topics.length === 0 && practiceFiles.length === 0 && workshops.length === 0 && exams.length === 0 && learnings.length === 0) {
+    return null;
+  }
+
+  for (const list of [topics, practiceFiles, workshops, exams, learnings]) {
+    for (const item of list) {
+      if (!item || typeof item !== "object") return null;
+      if (item.id && !sanitizeImportedId(item.id)) return null;
+    }
+  }
+
+  return {
+    version,
+    profile: {
+      name: typeof profile.name === "string" ? profile.name.slice(0, 120) : "",
+      career: typeof profile.career === "string" ? profile.career.slice(0, 120) : "",
+      university: typeof profile.university === "string" ? profile.university.slice(0, 120) : "",
+      professor: typeof profile.professor === "string" ? profile.professor.slice(0, 120) : "",
+      term: typeof profile.term === "string" ? profile.term.slice(0, 80) : "",
+      bio: typeof profile.bio === "string" ? profile.bio.slice(0, 500) : "",
+      goals: typeof profile.goals === "string" ? profile.goals.slice(0, 500) : ""
+    },
+    topics,
+    practiceFiles,
+    workshops,
+    exams,
+    learnings
+  };
+}
+
 function importBackupJSON(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async (e) => {
     try {
       const data = JSON.parse(e.target.result);
-      const importedDB = data.db || data;
+      const normalized = validateImportedPayload(data);
 
-      if (!importedDB.topics) {
-        showToast("El archivo seleccionado no tiene un formato de portafolio válido.", "error");
+      if (!normalized) {
+        showToast("El archivo seleccionado no tiene un formato de portafolio válido o contiene datos peligrosos.", "error");
         return;
       }
 
-      // Restaurar archivos a IndexedDB si vienen en el respaldo
-      if (Array.isArray(data.storedFiles)) {
-        for (const f of data.storedFiles) {
-          if (f.id && f.data) {
-            await FileStorage.saveFile(f.id, f.name, f.type, f.size, f.data);
+      const summary = `Temas: ${normalized.topics.length} · Talleres: ${normalized.workshops.length} · Parciales: ${normalized.exams.length} · Archivos: ${normalized.practiceFiles.length}`;
+      openCustomConfirmDialog(`Esto reemplaza todo tu trabajo actual. ${summary}. ¿Deseas continuar?`, async () => {
+        if (Array.isArray(data.storedFiles)) {
+          for (const f of data.storedFiles) {
+            if (f && f.id && f.data) {
+              await FileStorage.saveFile(f.id, String(f.name || "archivo"), String(f.type || "application/octet-stream"), Number(f.size || 0), String(f.data));
+            }
           }
         }
-      }
-
-      appDB = importedDB;
-      saveDatabase();
-      renderApp();
-      showToast("✓ Portafolio restaurado correctamente desde el respaldo.", "success");
+        appDB = sanitizePortfolioDatabase(normalized);
+        saveDatabase();
+        renderApp();
+        showToast("✓ Portafolio restaurado correctamente desde el respaldo.", "success");
+      });
     } catch (err) {
       console.error("Error al importar JSON:", err);
       showToast("Error al procesar el archivo JSON.", "error");
@@ -2910,6 +2992,36 @@ function clearAllData() {
 // ============================================================================
 
 document.addEventListener("DOMContentLoaded", async () => {
+  document.addEventListener("click", (event) => {
+    const actionTarget = event.target.closest("[data-action]");
+    if (actionTarget) {
+      const action = actionTarget.getAttribute("data-action");
+      if (action === "open-workshop-modal") openWorkshopModal();
+      if (action === "open-exam-modal") openExamModal();
+      if (action === "open-learning-modal") openLearningModal();
+      if (action === "save-card-editor") saveCardEditorChanges();
+      if (action === "close-modal") closeModal(actionTarget.getAttribute("data-modal-id") || "");
+    }
+
+    const closeTarget = event.target.closest("[data-close-modal]");
+    if (closeTarget) {
+      const modalId = closeTarget.getAttribute("data-close-modal");
+      if (modalId) closeModal(modalId);
+    }
+
+    const fileViewerCloseTarget = event.target.closest("[data-close-file-viewer]");
+    if (fileViewerCloseTarget) closeFileViewer();
+
+    const confirmCloseTarget = event.target.closest("[data-close-confirm]");
+    if (confirmCloseTarget) closeConfirmDialog();
+
+    const latexTarget = event.target.closest("[data-latex]");
+    if (latexTarget) {
+      const value = latexTarget.getAttribute("data-latex") || "";
+      insertLatexSnippet(value);
+    }
+  });
+
   // Inicializar IndexedDB en segundo plano
   await FileStorage.init();
 
