@@ -207,7 +207,7 @@ function isSafeAssetUrl(value) {
   const trimmed = value.trim();
   if (!trimmed) return false;
   if (trimmed.startsWith("blob:")) return true;
-  if (/^data:image\/(png|jpeg|webp);base64,/i.test(trimmed)) return true;
+  if (/^data:(image\/(png|jpeg|jpg|webp|gif|avif|bmp)|application\/pdf)(;base64)?,/i.test(trimmed)) return true;
   if (/^assets\//i.test(trimmed)) return true;
   return false;
 }
