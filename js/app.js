@@ -67,6 +67,8 @@ function resolveBootstrapDatabase() {
   return createEmptyDatabase();
 }
 
+window.sanitizePortfolioDatabase = sanitizePortfolioDatabase;
+
 // ============================================================================
 // ALMACENAMIENTO BINARIO CON INDEXEDDB (FileStorage)
 // Permite guardar imágenes y PDFs de cualquier tamaño sin saturar LocalStorage
@@ -952,6 +954,7 @@ const DEFAULT_DB = {
 // ============================================================================
 
 let appDB = loadDatabase();
+window.appDB = appDB;
 let currentView = "inicio";
 let activeDetailTopicId = null;
 let activeDetailSubtab = "sub-definiciones";
@@ -1067,9 +1070,13 @@ function saveDatabase() {
   isSaving = true;
   try {
     localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(appDB));
+    window.appDB = appDB;
     updateStorageMeter();
     setAutosaveUI("saved");
     isSaving = false;
+    if (window.SupabaseSync && typeof window.SupabaseSync.queuePush === "function") {
+      window.SupabaseSync.queuePush(appDB);
+    }
     return true;
   } catch (err) {
     isSaving = false;
@@ -1214,12 +1221,14 @@ function closeMobileMenu() {
 // ============================================================================
 
 function renderApp() {
+  window.appDB = appDB;
   updateProfileUI();
   updateNavBadges();
   populateTopicSelects();
   updateStorageMeter();
   renderActiveView();
 }
+window.renderApp = renderApp;
 
 function updateNavBadges() {
   const topicsCount = appDB.topics.length;
@@ -3573,6 +3582,34 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("clearAllDataBtn")?.addEventListener("click", clearAllData);
   document.getElementById("loadDemoDataBtn")?.addEventListener("click", restoreDefaultData);
 
+  // Configuración y eventos de Supabase en la nube
+  document.getElementById("saveSupabaseSettingsBtn")?.addEventListener("click", async () => {
+    const url = document.getElementById("supabaseUrlInput")?.value || "";
+    const key = document.getElementById("supabaseKeyInput")?.value || "";
+    if (window.SupabaseSync) {
+      showToast("Conectando con Supabase...", "info");
+      const res = await window.SupabaseSync.saveSettings(url, key);
+      showToast(res.message, res.success ? "success" : "error");
+    }
+  });
+
+  document.getElementById("manualSupabaseSyncBtn")?.addEventListener("click", async () => {
+    if (window.SupabaseSync) {
+      if (!window.SupabaseSync.isConfigured()) {
+        showToast("Primero ingresa y guarda la URL y la Anon Key de Supabase.", "warning");
+        return;
+      }
+      showToast("Subiendo datos a Supabase...", "info");
+      const ok = await window.SupabaseSync.pushDataNow(appDB);
+      if (ok) showToast("✓ Datos sincronizados con éxito en la nube.", "success");
+    }
+  });
+
   // Renderizar la app completa
   renderApp();
+
+  // Inicializar sincronización en la nube con Supabase
+  if (window.SupabaseSync) {
+    window.SupabaseSync.init();
+  }
 });

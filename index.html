@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: https://fonts.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://cdn.jsdelivr.net data:; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net; media-src 'self' blob:; object-src 'self' blob:; frame-src 'self' blob:; base-uri 'self'; form-action 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: https://fonts.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://cdn.jsdelivr.net data:; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net https://*.supabase.co wss://*.supabase.co; media-src 'self' blob:; object-src 'self' blob:; frame-src 'self' blob:; base-uri 'self'; form-action 'self';">
   <meta name="description" content="Portafolio Digital interactivo y académico de Física I. Organización de temas, definiciones, fórmulas matemáticas con KaTeX, prácticas de laboratorio, talleres evaluativos, parciales corregidos y metacognición.">
   <title>Portafolio Digital de Física I | Plataforma Académica</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>Φ</text></svg>">
@@ -666,6 +666,45 @@
             </label>
           </div>
 
+          <!-- Tarjeta: Sincronización Automática en la Nube con Supabase -->
+          <div class="backup-card">
+            <div class="backup-card-icon green">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+            </div>
+            <h3>Sincronización en la Nube (Supabase)</h3>
+            <p>Conecta tu base de datos Supabase para que cualquier tema, nota, actividad o cambio de perfil se guarde en la nube y se actualice automáticamente en la web pública para todos los visitantes.</p>
+            
+            <div class="storage-metric-box" style="margin-bottom: 14px;">
+              <div class="storage-metric-row">
+                <span>Estado de conexión:</span>
+                <strong id="supabaseCloudStatus"><span style="color: #64748b;">● Modo local (sin sincronización en la nube)</span></strong>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label for="supabaseUrlInput" style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Project URL de Supabase</label>
+              <input type="url" id="supabaseUrlInput" placeholder="https://tu-proyecto.supabase.co" style="width: 100%; padding: 8px 12px; font-size: 13px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-body);">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 14px;">
+              <label for="supabaseKeyInput" style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Anon / Public Key</label>
+              <input type="password" id="supabaseKeyInput" placeholder="eyJhbGciOiJIUzI1NiIsIn..." style="width: 100%; padding: 8px 12px; font-size: 13px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-body);">
+            </div>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-primary btn-sm" id="saveSupabaseSettingsBtn" type="button" style="flex: 1;">
+                Conectar y sincronizar
+              </button>
+              <button class="btn btn-outline btn-sm" id="manualSupabaseSyncBtn" type="button" title="Forzar sincronización inmediata">
+                Subir ahora
+              </button>
+            </div>
+
+            <p class="backup-hint" style="margin-top: 10px;">
+              Los cambios que hagas se guardan localmente y se transmiten en tiempo real a la nube.
+            </p>
+          </div>
+
           <!-- Tarjeta: Memoria LocalStorage -->
           <div class="backup-card">
             <div class="backup-card-icon green">
@@ -1259,6 +1298,11 @@
   <!-- Semilla vacía y datos de demostración opcionales -->
   <script src="js/seed.js"></script>
   <script src="js/demo-data.js"></script>
+
+  <!-- Supabase y sincronización en la nube -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/supabase-sync.js"></script>
 
   <!-- Script principal de la aplicación -->
   <script src="js/app.js?v=4.5"></script>
