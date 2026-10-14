@@ -2740,11 +2740,20 @@ function executeDelete() {
 // VISOR DE ARCHIVOS Y MULTIMEDIA (FileViewerModal)
 // ============================================================================
 
-function openFileViewer(name, type, data) {
+let fileViewerObjectUrl = null;
+let fileViewerRequestId = 0;
+
+async function openFileViewer(name, type, data) {
   const safeValue = safeObjectUrl(data, "");
   if (!safeValue) {
     showToast("No hay vista previa disponible para este archivo.", "info");
     return;
+  }
+
+  const requestId = ++fileViewerRequestId;
+  if (fileViewerObjectUrl) {
+    URL.revokeObjectURL(fileViewerObjectUrl);
+    fileViewerObjectUrl = null;
   }
 
   document.getElementById("fileViewerTitle").textContent = name || "Vista de Archivo";
@@ -2752,22 +2761,47 @@ function openFileViewer(name, type, data) {
   const isPdf = (type && type.includes("pdf")) || (name && name.toLowerCase().endsWith(".pdf"));
 
   if (isPdf) {
-    body.innerHTML = `
-      <div style="height: 60vh; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px;">
-        <object data="${safeValue}" type="application/pdf" width="100%" height="100%">
-          <div style="text-align: center; padding: 30px;">
-            <p>Tu navegador no admite visualización directa embebida del PDF.</p>
-            <a href="${safeValue}" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Abrir PDF en pestaña nueva</a>
-          </div>
-        </object>
-      </div>
-    `;
+    body.innerHTML = '<p class="text-muted" role="status">Preparando vista previa del PDF...</p>';
+    openModal("fileViewerModal");
+
+    try {
+      let pdfBlob;
+      if (safeValue.startsWith("data:")) {
+        const commaIndex = safeValue.indexOf(",");
+        if (commaIndex === -1) throw new Error("El PDF tiene un data URL inválido.");
+        const metadata = safeValue.slice(0, commaIndex);
+        const payload = safeValue.slice(commaIndex + 1);
+        const binary = /;base64/i.test(metadata) ? atob(payload) : decodeURIComponent(payload);
+        const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+        pdfBlob = new Blob([bytes], { type: "application/pdf" });
+      } else {
+        const response = await fetch(safeValue);
+        if (!response.ok) throw new Error(`No se pudo cargar el PDF (${response.status}).`);
+        pdfBlob = await response.blob();
+      }
+      if (requestId !== fileViewerRequestId) return;
+
+      fileViewerObjectUrl = URL.createObjectURL(new Blob([pdfBlob], { type: "application/pdf" }));
+      body.innerHTML = `
+        <iframe title="Vista previa: ${escapeHTML(name || "documento PDF")}" src="${fileViewerObjectUrl}" style="width: 100%; height: 70vh; min-height: 420px; border: 0; background: #fff;"></iframe>
+      `;
+    } catch (error) {
+      if (requestId !== fileViewerRequestId) return;
+      body.innerHTML = `
+        <div style="padding: 24px; text-align: center;">
+          <p>No se pudo mostrar la vista previa de este PDF.</p>
+          <a href="${safeValue}" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Abrir PDF en pestaña nueva</a>
+        </div>
+      `;
+      console.error("Error al preparar la vista previa del PDF:", error);
+    }
   } else {
     body.innerHTML = `
       <div style="display: flex; justify-content: center; align-items: center; max-height: 70vh; overflow: auto;">
         <img src="${safeValue}" alt="${escapeHTML(name)}" style="max-width: 100%; max-height: 68vh; object-fit: contain; border-radius: 8px;">
       </div>
     `;
+    openModal("fileViewerModal");
   }
 
   const downloadBtn = document.getElementById("fileViewerDownloadBtn");
@@ -2780,10 +2814,14 @@ function openFileViewer(name, type, data) {
     };
   }
 
-  openModal("fileViewerModal");
 }
 
 function closeFileViewer() {
+  fileViewerRequestId++;
+  if (fileViewerObjectUrl) {
+    URL.revokeObjectURL(fileViewerObjectUrl);
+    fileViewerObjectUrl = null;
+  }
   closeModal("fileViewerModal");
 }
 

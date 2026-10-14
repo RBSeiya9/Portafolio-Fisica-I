@@ -29,9 +29,19 @@ if (imageResult !== imageDataUrl) {
 }
 
 const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/i)?.[1] || '';
-const objectSource = csp.match(/(?:^|;\s*)object-src\s+([^;]+)/i)?.[1] || '';
-if (!objectSource.split(/\s+/).includes('data:')) {
-  throw new Error('Content Security Policy must allow data: URLs for embedded PDF previews');
+const frameSource = csp.match(/(?:^|;\s*)frame-src\s+([^;]+)/i)?.[1] || '';
+if (!frameSource.split(/\s+/).includes('blob:')) {
+  throw new Error('Content Security Policy must allow blob: frames for embedded PDF previews');
+}
+if (!html.includes('src="js/app.js?v=4.2"')) {
+  throw new Error('App script cache key must be bumped so browsers load the fixed PDF viewer');
+}
+
+const viewerStart = source.indexOf('async function openFileViewer');
+const viewerEnd = source.indexOf('function closeFileViewer', viewerStart);
+const viewerSource = source.slice(viewerStart, viewerEnd);
+if (!viewerSource.includes('atob(payload)') || !viewerSource.includes('new Blob([pdfBlob], { type: "application/pdf" })') || !viewerSource.includes('<iframe')) {
+  throw new Error('PDF viewer must decode data URLs locally and embed a Blob URL in an iframe');
 }
 
 console.log('PDF preview test passed');
