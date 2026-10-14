@@ -383,6 +383,17 @@ function getReferencedFileIds(database = appDB) {
   return [...new Set(ids.filter(Boolean))];
 }
 
+function createBackupDatabase(database = appDB) {
+  const backup = structuredClone(database);
+  for (const workshop of backup.workshops || []) {
+    for (const key of ["statement", "formulas", "stepByStep", "finalAnswer", "verification"]) delete workshop[key];
+  }
+  for (const exam of backup.exams || []) {
+    for (const key of ["statement", "originalProcedure", "identifiedError", "correctSolution", "verification"]) delete exam[key];
+  }
+  return backup;
+}
+
 function dataUrlToBlob(dataUrl, fallbackType = "application/octet-stream") {
   if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return null;
   const commaIndex = dataUrl.indexOf(",");
@@ -844,11 +855,6 @@ const DEFAULT_DB = {
       topicId: "tema-vectores",
       title: "Taller 1 - Ejercicio 4: Ángulo y Proyección Entre Fuerzas en 3D",
       date: "2026-03-18",
-      statement: "Dadas dos fuerzas coplanares F₁ = (40î - 20ĵ + 10k̂) N y F₂ = (-15î + 30ĵ + 25k̂) N aplicadas en el origen, determine el ángulo entre ambas fuerzas y la componente proyectada de F₁ sobre la línea de acción de F₂.",
-      formulas: "\\vec{F}_1 \\cdot \\vec{F}_2 = |\\vec{F}_1||\\vec{F}_2| \\cos(\\phi), \\quad \\text{Proy}_{F_2}(F_1) = \\frac{\\vec{F}_1 \\cdot \\vec{F}_2}{|\\vec{F}_2|}",
-      stepByStep: "Paso 1: Módulos individuales:\n|F₁| = √(40² + (-20)² + 10²) = 45.83 N\n|F₂| = √((-15)² + 30² + 25²) = 41.83 N\n\nPaso 2: Producto escalar por componentes:\nF₁ · F₂ = (40)(-15) + (-20)(30) + (10)(25) = -950 N²\n\nPaso 3: Ángulo entre vectores:\ncos(φ) = (-950) / (45.83 × 41.83) = -0.4955 ⇒ φ = 119.70°\n\nPaso 4: Proyección escalar:\nProy = -950 / 41.83 = -22.71 N",
-      finalAnswer: "Ángulo φ = 119.70° (obtuso). Proyección escalar de F₁ sobre F₂ = -22.71 N.",
-      verification: "Comprobación geométrica: Proy = |F₁| cos(φ) = 45.83 × cos(119.70°) = -22.71 N.",
       reflection: "El producto escalar simplifica enormemente el cálculo de proyecciones espaciales sin recurrir a geometría tridimensional compleja.",
       files: []
     },
@@ -857,11 +863,6 @@ const DEFAULT_DB = {
       topicId: "tema-cinematica",
       title: "Taller 2 - Ejercicio 3: Encuentro de Dos Móviles en MRUV",
       date: "2026-04-02",
-      statement: "Dos vehículos A y B parten simultáneamente de dos puntos separados 600 metros viajando en sentidos opuestos. El móvil A parte del reposo acelerando a 2 m/s². El móvil B viaja hacia A con velocidad constante de 15 m/s. Halle el tiempo y la posición de encuentro.",
-      formulas: "x_A(t) = \\frac{1}{2} a_A t^2, \\quad x_B(t) = 600 - v_B t",
-      stepByStep: "Paso 1: Ecuaciones horarias con origen en A:\nxA(t) = t²\nxB(t) = 600 - 15 t\n\nPaso 2: Condición de encuentro xA = xB:\nt² + 15 t - 600 = 0\n\nPaso 3: Fórmula cuadrática:\nt = [-15 + √(225 + 2400)] / 2 = 18.12 segundos\n\nPaso 4: Posición:\nxA(18.12) = 328.33 metros desde el punto de partida de A.",
-      finalAnswer: "Tiempo de encuentro t = 18.12 s; Posición x = 328.33 m.",
-      verification: "Comprobación con móvil B: xB(18.12) = 600 - 15(18.12) = 328.2 m.",
       reflection: "Fijar un único sistema de coordenadas desde el primer renglón evita por completo confusiones de signos en movimientos opuestos.",
       files: []
     },
@@ -870,11 +871,6 @@ const DEFAULT_DB = {
       topicId: "tema-newton",
       title: "Taller 3 - Ejercicio 5: Sistema Acoplado en la Máquina de Atwood",
       date: "2026-04-16",
-      statement: "Dos masas m₁ = 3 kg y m₂ = 5 kg están conectadas por una cuerda inextensible y ligera que pasa por una polea ideal sin fricción. Halle la aceleración del sistema y la tensión en la cuerda al soltarlas del reposo.",
-      formulas: "T - m_1 g = m_1 a, \\quad m_2 g - T = m_2 a \\implies a = \\frac{m_2 - m_1}{m_1 + m_2} g",
-      stepByStep: "Paso 1: DCL y ecuaciones dinámicas individuales:\nPara m₁: T - 3(9.8) = 3 a\nPara m₂: 5(9.8) - T = 5 a\n\nPaso 2: Sumando ambas ecuaciones:\n(5 - 3)(9.8) = (3 + 5) a ⇒ 19.6 = 8 a ⇒ a = 2.45 m/s²\n\nPaso 3: Sustituyendo en la primera ecuación:\nT = 3(9.8 + 2.45) = 36.75 N",
-      finalAnswer: "Aceleración a = 2.45 m/s²; Tensión en la cuerda T = 36.75 N.",
-      verification: "Comprobando en m₂: T = 5(9.8 - 2.45) = 36.75 N.",
       reflection: "Al sumar las ecuaciones del sistema se cancelan las fuerzas internas (tensión), facilitando el despeje inmediato de la aceleración.",
       files: []
     }
@@ -886,11 +882,6 @@ const DEFAULT_DB = {
       title: "Primer Parcial - Problema 1: Cálculo de Trabajo y Ángulo Relativo",
       date: "2026-04-20",
       evaluatedContents: "Álgebra vectorial, producto escalar, descomposición cartesiana",
-      statement: "Un bloque es arrastrado sobre un plano horizontal una distancia de 8 metros por una fuerza constante F = 60 N orientada a 30° sobre la horizontal. Calcule el trabajo efectuado por dicha fuerza.",
-      originalProcedure: "Se utilizó la fórmula W = F · d · cos(θ), pero se colocó: W = 60 N × 8 m × cos(60°) = 240 J, confundiéndose el ángulo de inclinación respecto a la vertical con el ángulo respecto a la horizontal.",
-      identifiedError: "ERROR DE LECTURA Y DEFINICIÓN: El enunciado indicaba 30° con la horizontal (paralelo al desplazamiento). Se tomó erróneamente el ángulo complementario con la normal vertical (60°), reduciendo a la mitad el trabajo real.",
-      correctSolution: "Paso 1: Identificar ángulo relativo φ entre F y el desplazamiento Δr:\nφ = 30° - 0° = 30°\n\nPaso 2: Cálculo con definición formal:\nW = |F| |Δr| cos(30°) = 60 N × 8 m × (√3 / 2) = 415.69 Joules",
-      verification: "Comprobación por componentes: Fx = 60 cos(30°) = 51.96 N. W = Fx · Δx = 51.96 N × 8 m = 415.68 J.",
       preventionReflection: "Siempre trazar ambos vectores partiendo del mismo punto origen e identificar explícitamente el ángulo relativo antes de calcular funciones trigonométricas.",
       files: []
     },
@@ -900,11 +891,6 @@ const DEFAULT_DB = {
       title: "Primer Parcial - Problema 3: Proyectil Disparado desde un Acantilado",
       date: "2026-04-20",
       evaluatedContents: "Cinemática en dos dimensiones, tiro parabólico con desnivel vertical",
-      statement: "Un proyectil se dispara desde la cima de un acantilado de 45 m de altura con rapidez de 25 m/s a un ángulo de 37° por encima de la horizontal. Halle el alcance horizontal hasta impactar en el suelo.",
-      originalProcedure: "Se utilizó la fórmula de alcance simplificado: R = (v₀² sin 2θ) / g = (25² · sin 74°) / 9.8 = 61.31 metros.",
-      identifiedError: "ERROR DE HIPÓTESIS DE VALIDEZ: Se aplicó la fórmula de alcance horizontal plano que sólo es válida cuando la altura final es igual a la inicial (Δy = 0), ignorando los 45 metros de caída extra.",
-      correctSolution: "Paso 1: Descomposición inicial: v₀x = 19.96 m/s; v₀y = 15.04 m/s\nPaso 2: Ecuación vertical: 45 + 15.04 t - 4.9 t² = 0 ⇒ t = 4.93 s\nPaso 3: Alcance horizontal: x = 19.96 m/s × 4.93 s = 98.40 metros",
-      verification: "Comprobación energética: rapidez de impacto v = √(25² + 2(9.8)(45)) = 38.82 m/s.",
       preventionReflection: "Nunca aplicar fórmulas de atajo sin verificar primero si se cumplen todas sus hipótesis de deducción (como Δy = 0). Las ecuaciones paramétricas horarias son universales.",
       files: []
     },
@@ -914,11 +900,6 @@ const DEFAULT_DB = {
       title: "Segundo Parcial - Problema 2: Bloques Superpuestos y Fricción de Contacto",
       date: "2026-05-15",
       evaluatedContents: "Leyes de Newton, fricción estática máxima, sistemas acoplados, DCL",
-      statement: "Un bloque A de 2 kg descansa sobre un bloque B de 4 kg. Se aplica una fuerza horizontal F al bloque B sobre un suelo liso. Si μs = 0.4 entre ambos bloques, calcule la fuerza máxima F para que el bloque A no deslice sobre B.",
-      originalProcedure: "Se planteó que la fricción máxima actuaba como fuerza externa en contra del movimiento del sistema: F = fs_max = μs mA g = 0.4(2)(9.8) = 7.84 N.",
-      identifiedError: "ERROR GRAVE EN EL DCL Y TERCERA LEY: Se olvidó que la fuerza de fricción entre A y B es una fuerza INTERNA del sistema combinado. Es la fricción hacia adelante sobre el bloque A la que le suministra su aceleración.",
-      correctSolution: "Paso 1: Analizar bloque A: a_max = μs g = 0.4 × 9.8 = 3.92 m/s²\nPaso 2: Sistema conjunto (A+B): F_max = (2 + 4) × 3.92 = 23.52 N",
-      verification: "Comprobación: F_neta_B = 23.52 - 7.84 = 15.68 N ⇒ a = 15.68 / 4 = 3.92 m/s².",
       preventionReflection: "Siempre que existan cuerpos superpuestos o en contacto, aislar CADA cuerpo por separado en su propio DCL y verificar que las fuerzas de interacción mutua sean pares de acción y reacción opuestos.",
       files: []
     }
@@ -3183,7 +3164,7 @@ async function exportBackupJSON() {
       app: "Portafolio Digital de Física I",
       version: "4.0",
       exportedAt: new Date().toISOString(),
-      db: appDB,
+      db: createBackupDatabase(),
       storedFiles: files
     };
     const jsonStr = JSON.stringify(payload, null, 2);

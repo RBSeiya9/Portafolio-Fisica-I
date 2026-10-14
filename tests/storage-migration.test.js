@@ -5,8 +5,12 @@ const source = fs.readFileSync('js/app.js', 'utf8');
 const dataUrlStart = source.indexOf('function dataUrlToBlob');
 const migrationStart = source.indexOf('async function migrateEmbeddedFilesToIndexedDB');
 const migrationEnd = source.indexOf('async function saveUploadedFile', migrationStart);
+const backupStart = source.indexOf('function createBackupDatabase');
+const backupEnd = source.indexOf('function dataUrlToBlob', backupStart);
+const validatorStart = source.indexOf('function validateImportedPayload');
+const validatorEnd = source.indexOf('function importBackupJSON', validatorStart);
 
-if ([dataUrlStart, migrationStart, migrationEnd].some(index => index < 0) || dataUrlStart >= migrationStart) {
+if ([dataUrlStart, migrationStart, migrationEnd, backupStart, backupEnd, validatorStart, validatorEnd].some(index => index < 0) || dataUrlStart >= migrationStart) {
   throw new Error('No se encontraron las funciones de migración de archivos en js/app.js');
 }
 
@@ -20,6 +24,7 @@ const sandbox = {
   generateUniqueId: prefix => `${prefix}_generated`,
   appDB: {},
   saveDatabase: () => true,
+  sanitizeImportedId: value => typeof value === 'string' && /^[\w-]+$/.test(value),
   FileStorage: {
     async saveBlob(id, name, type, size, blob) {
       if (failWrites) return false;
@@ -29,7 +34,7 @@ const sandbox = {
   }
 };
 
-vm.runInNewContext(source.slice(dataUrlStart, migrationEnd), sandbox);
+vm.runInNewContext(source.slice(backupStart, backupEnd) + source.slice(validatorStart, validatorEnd) + source.slice(dataUrlStart, migrationEnd), sandbox);
 
 (async () => {
   const legacyData = 'data:image/png;base64,AAECAwQ=';
@@ -67,7 +72,30 @@ vm.runInNewContext(source.slice(dataUrlStart, migrationEnd), sandbox);
     throw new Error('IndexedDB failure must preserve the original database data');
   }
 
-  console.log('Storage migration tests passed');
+  const legacyPayload = {
+    version: 3,
+    profile: {},
+    topics: [],
+    practiceFiles: [{ id: 'legacy-file', name: 'scan.pdf', data: 'data:application/pdf;base64,JVBERi0xLjQK' }],
+    workshops: [{ id: 'legacy-workshop', title: 'Older workshop', statement: 'Legacy statement', stepByStep: 'Legacy work' }],
+    exams: [{ id: 'legacy-exam', title: 'Older exam', identifiedError: 'Legacy error', correctSolution: 'Legacy solution' }],
+    learnings: []
+  };
+  const normalizedLegacyPayload = sandbox.validateImportedPayload({ db: legacyPayload });
+  if (!normalizedLegacyPayload || normalizedLegacyPayload.workshops[0].statement !== 'Legacy statement' || normalizedLegacyPayload.exams[0].identifiedError !== 'Legacy error') {
+    throw new Error('Legacy import validation must preserve old workshop/exam fields');
+  }
+
+  const backupSource = structuredClone(legacyPayload);
+  const backup = sandbox.createBackupDatabase(backupSource);
+  if ('statement' in backup.workshops[0] || 'stepByStep' in backup.workshops[0] || 'identifiedError' in backup.exams[0] || 'correctSolution' in backup.exams[0]) {
+    throw new Error('New backup projection must omit retired workshop/exam fields');
+  }
+  if (backupSource.workshops[0].statement !== 'Legacy statement' || backupSource.exams[0].identifiedError !== 'Legacy error') {
+    throw new Error('New backup projection must not mutate the active database');
+  }
+
+  console.log('Storage migration and legacy-backup tests passed');
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;
