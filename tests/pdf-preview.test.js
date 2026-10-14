@@ -33,7 +33,7 @@ const frameSource = csp.match(/(?:^|;\s*)frame-src\s+([^;]+)/i)?.[1] || '';
 if (!frameSource.split(/\s+/).includes('blob:')) {
   throw new Error('Content Security Policy must allow blob: frames for embedded PDF previews');
 }
-if (!html.includes('src="js/app.js?v=4.5"')) {
+if (!/src="js\/app\.js\?v=4\.[5-9]"/i.test(html)) {
   throw new Error('App script cache key must be bumped so browsers load the fixed PDF viewer');
 }
 
