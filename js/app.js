@@ -2206,8 +2206,7 @@ function renderTalleres() {
   let filtered = appDB.workshops.filter(w => {
     const matchSearch = !filters.workshopsSearch ||
       (w.title && w.title.toLowerCase().includes(filters.workshopsSearch.toLowerCase())) ||
-      (w.statement && w.statement.toLowerCase().includes(filters.workshopsSearch.toLowerCase())) ||
-      (w.finalAnswer && w.finalAnswer.toLowerCase().includes(filters.workshopsSearch.toLowerCase()));
+      (w.reflection && w.reflection.toLowerCase().includes(filters.workshopsSearch.toLowerCase()));
     const matchTopic = filters.workshopsTopic === "all" || w.topicId === filters.workshopsTopic;
     return matchSearch && matchTopic;
   });
@@ -2227,15 +2226,10 @@ function renderTalleres() {
         </div>
         ${topicTitle ? `<div class="activity-card-topic">${escapeHTML(topicTitle)}</div>` : ''}
         <h3 class="activity-card-title">${escapeHTML(w.title)}</h3>
-        <p class="activity-card-snippet">${escapeHTML(w.statement || "")}</p>
-        ${w.finalAnswer ? `
-          <div class="activity-card-highlight">
-            <strong>Respuesta:</strong> ${escapeHTML(w.finalAnswer)}
-          </div>
-        ` : ''}
+        ${w.reflection ? `<p class="activity-card-snippet">${escapeHTML(w.reflection)}</p>` : ''}
         <div class="activity-card-footer">
           <button class="btn btn-primary btn-sm" onclick="openItemViewerModal('workshop', '${escapeHTML(w.id)}')">
-            Ver desarrollo
+            Ver taller
           </button>
           <div class="activity-card-actions">
             <button class="icon-action-btn" title="Editar taller" onclick="openWorkshopModal('${escapeHTML(w.id)}')">
@@ -2337,11 +2331,6 @@ function openWorkshopModal(workshopId = null) {
       topicId: "",
       title: "",
       date: new Date().toISOString().slice(0, 10),
-      statement: "",
-      formulas: "",
-      stepByStep: "",
-      finalAnswer: "",
-      verification: "",
       reflection: "",
       files: []
     };
@@ -2356,11 +2345,6 @@ function openWorkshopModal(workshopId = null) {
   document.getElementById("workshopFormTitle").value = item.title || "";
   document.getElementById("workshopFormDate").value = item.date || new Date().toISOString().slice(0, 10);
   document.getElementById("workshopFormTopicSelect").value = item.topicId || "";
-  document.getElementById("workshopFormStatement").value = item.statement || "";
-  document.getElementById("workshopFormFormulas").value = item.formulas || "";
-  document.getElementById("workshopFormStepByStep").value = item.stepByStep || "";
-  document.getElementById("workshopFormAnswer").value = item.finalAnswer || "";
-  document.getElementById("workshopFormVerification").value = item.verification || "";
   document.getElementById("workshopFormReflection").value = item.reflection || "";
 
   setupModalFilesAttachment("workshopFormFiles", "workshopFormFilesPreview", item);
@@ -2374,21 +2358,9 @@ function openWorkshopModal(workshopId = null) {
       document.getElementById("workshopFormTitle").focus();
       return;
     }
-    const stmtVal = document.getElementById("workshopFormStatement").value.trim();
-    if (!stmtVal) {
-      showToast("Ingresa el enunciado o problema del taller.", "error");
-      document.getElementById("workshopFormStatement").focus();
-      return;
-    }
-
     item.title = titleVal;
     item.date = document.getElementById("workshopFormDate").value;
     item.topicId = document.getElementById("workshopFormTopicSelect").value;
-    item.statement = stmtVal;
-    item.formulas = document.getElementById("workshopFormFormulas").value;
-    item.stepByStep = document.getElementById("workshopFormStepByStep").value;
-    item.finalAnswer = document.getElementById("workshopFormAnswer").value;
-    item.verification = document.getElementById("workshopFormVerification").value;
     item.reflection = document.getElementById("workshopFormReflection").value;
 
     if (isNewWorkshop) {
@@ -2802,30 +2774,6 @@ function openItemViewerModal(type, itemId) {
         <span class="viewer-tag">${topicTitle ? `TEMA: ${escapeHTML(topicTitle)} · ` : ''}FECHA: ${escapeHTML(w.date || '')}</span>
         <h3 class="viewer-title">${escapeHTML(w.title)}</h3>
       </div>
-      <div class="viewer-block">
-        <h4>Enunciado del Problema:</h4>
-        <p>${escapeHTML(w.statement)}</p>
-      </div>
-      ${w.formulas ? `
-        <div class="viewer-block">
-          <h4>Fórmulas Empleadas:</h4>
-          <div class="katex-rendered-box">${formatLatex(w.formulas, true)}</div>
-        </div>
-      ` : ''}
-      <div class="viewer-block">
-        <h4>Procedimiento y Desarrollo Paso a Paso:</h4>
-        <pre class="viewer-pre">${escapeHTML(w.stepByStep)}</pre>
-      </div>
-      <div class="viewer-block highlight">
-        <h4>Respuesta Final:</h4>
-        <p><strong>${escapeHTML(w.finalAnswer)}</strong></p>
-      </div>
-      ${w.verification ? `
-        <div class="viewer-block">
-          <h4>Verificación:</h4>
-          <p>${escapeHTML(w.verification)}</p>
-        </div>
-      ` : ''}
       ${w.reflection ? `
         <div class="viewer-block">
           <h4>Reflexión:</h4>
