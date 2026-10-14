@@ -105,16 +105,38 @@ const FileStorage = {
   },
 
   async saveFile(id, name, type, size, data) {
-    this._cache.set(id, data);
     const db = await this.init();
-    if (!db) return true;
+    if (!db) return false;
     return new Promise((resolve) => {
       try {
         const tx = db.transaction(this.storeName, "readwrite");
         const store = tx.objectStore(this.storeName);
         store.put({ id, name, type, size, data, updatedAt: Date.now() });
-        tx.oncomplete = () => resolve(true);
+        tx.oncomplete = () => {
+          this._cache.set(id, data);
+          resolve(true);
+        };
         tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  },
+
+  async saveBlob(id, name, type, size, blob) {
+    const db = await this.init();
+    if (!db || !(blob instanceof Blob)) return false;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(this.storeName, "readwrite");
+        tx.objectStore(this.storeName).put({ id, name, type, size, blob, updatedAt: Date.now() });
+        tx.oncomplete = () => {
+          this._cache.set(id, blob);
+          resolve(true);
+        };
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
       } catch (e) {
         resolve(false);
       }
@@ -145,6 +167,34 @@ const FileStorage = {
     });
   },
 
+  async getBlob(id) {
+    const cached = this._cache.get(id);
+    if (cached instanceof Blob) return cached;
+    const db = await this.init();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(this.storeName, "readonly");
+        const request = tx.objectStore(this.storeName).get(id);
+        request.onsuccess = () => {
+          const record = request.result;
+          if (record?.blob instanceof Blob) {
+            this._cache.set(id, record.blob);
+            resolve(record.blob);
+          } else if (record?.data instanceof Blob) {
+            this._cache.set(id, record.data);
+            resolve(record.data);
+          } else {
+            resolve(null);
+          }
+        };
+        request.onerror = () => resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  },
+
   async deleteFile(id) {
     this._cache.delete(id);
     const db = await this.init();
@@ -156,6 +206,29 @@ const FileStorage = {
         store.delete(id);
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  },
+
+  async deleteFiles(ids) {
+    const uniqueIds = [...new Set((ids || []).filter(Boolean))];
+    const results = await Promise.all(uniqueIds.map(id => this.deleteFile(id)));
+    return results.every(Boolean);
+  },
+
+  async clear() {
+    this._cache.clear();
+    const db = await this.init();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(this.storeName, "readwrite");
+        tx.objectStore(this.storeName).clear();
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
       } catch (e) {
         resolve(false);
       }
@@ -216,6 +289,196 @@ function safeObjectUrl(data, fallback = "") {
   if (!data || typeof data !== "string") return fallback;
   if (isSafeAssetUrl(data)) return data;
   return fallback;
+}
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const SUPPORTED_UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "application/pdf"]);
+const renderedFileObjectUrls = new Set();
+
+function createTrackedObjectUrl(blob) {
+  const url = URL.createObjectURL(blob);
+  renderedFileObjectUrls.add(url);
+  return url;
+}
+
+function revokeRenderedObjectUrls() {
+  renderedFileObjectUrls.forEach(url => URL.revokeObjectURL(url));
+  renderedFileObjectUrls.clear();
+}
+
+function inferSupportedFileType(file) {
+  const extension = String(file?.name || "").split(".").pop().toLowerCase();
+  const byExtension = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    pdf: "application/pdf"
+  };
+  const type = String(file?.type || "").toLowerCase();
+  return SUPPORTED_UPLOAD_TYPES.has(type) ? type : (byExtension[extension] || "");
+}
+
+async function processUploadFile(file, imagesOnly = false) {
+  const type = inferSupportedFileType(file);
+  if (!type || (imagesOnly && type === "application/pdf")) {
+    throw new Error("Formato no admitido. Usa PNG, JPG/JPEG, WEBP o PDF.");
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error("El archivo supera el máximo permitido de 10 MB.");
+  }
+
+  if (type === "application/pdf") {
+    return { blob: file.slice(0, file.size, type), type, size: file.size };
+  }
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch (error) {
+    throw new Error("No se pudo leer la imagen seleccionada.");
+  }
+
+  const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+  if (scale === 1) {
+    bitmap.close?.();
+    return { blob: file.slice(0, file.size, type), type, size: file.size };
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/webp", 0.85));
+  if (!blob) throw new Error("No se pudo optimizar la imagen.");
+  return { blob, type: blob.type || "image/webp", size: blob.size };
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("No se pudo preparar el archivo para el respaldo."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function getReferencedFileIds(database = appDB) {
+  const ids = [];
+  (database.practiceFiles || []).forEach(file => {
+    if (!file.assetPath) ids.push(file.fileId || file.id);
+  });
+  for (const topic of database.topics || []) {
+    for (const section of ["definitions", "formulas", "metacognition", "evidencias"]) {
+      for (const card of topic[section] || []) if (card.imageFileId) ids.push(card.imageFileId);
+    }
+  }
+  for (const record of [...(database.workshops || []), ...(database.exams || []), ...(database.learnings || [])]) {
+    (record.files || []).forEach(file => {
+      if (!file.assetPath) ids.push(file.fileId || file.id);
+    });
+  }
+  return [...new Set(ids.filter(Boolean))];
+}
+
+function dataUrlToBlob(dataUrl, fallbackType = "application/octet-stream") {
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return null;
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex < 0) return null;
+  const metadata = dataUrl.slice(5, commaIndex);
+  const mimeType = metadata.split(";")[0] || fallbackType;
+  const payload = dataUrl.slice(commaIndex + 1);
+  try {
+    if (/;base64/i.test(metadata)) {
+      const binary = atob(payload);
+      const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+      return new Blob([bytes], { type: mimeType });
+    }
+    return new Blob([decodeURIComponent(payload)], { type: mimeType });
+  } catch (error) {
+    return null;
+  }
+}
+
+async function migrateEmbeddedFilesToIndexedDB(database = appDB) {
+  const sourceDatabase = database;
+  const workingDatabase = structuredClone(database);
+  let changed = false;
+  const persistLegacyData = async (record, dataKey, fileIdKey, nameKey, typeKey) => {
+    const data = record[dataKey];
+    if (typeof data !== "string") return;
+    if (data.startsWith("assets/")) {
+      record.assetPath = data;
+      delete record[dataKey];
+      changed = true;
+      return;
+    }
+    if (!data.startsWith("data:")) return;
+    const blob = dataUrlToBlob(data, record[typeKey]);
+    if (!blob) throw new Error(`No se pudo migrar el archivo "${record[nameKey] || "adjunto"}".`);
+    const fileId = record[fileIdKey] || record.id || generateUniqueId("file");
+    const type = blob.type || record[typeKey] || "application/octet-stream";
+    const saved = await FileStorage.saveBlob(fileId, record[nameKey] || "archivo", type, blob.size, blob);
+    if (!saved) throw new Error(`No se pudo guardar "${record[nameKey] || "adjunto"}" en IndexedDB; los datos originales se conservaron.`);
+    record[fileIdKey] = fileId;
+    record[typeKey] = type;
+    delete record[dataKey];
+    changed = true;
+  };
+
+  for (const topic of workingDatabase.topics || []) {
+    for (const section of ["definitions", "formulas", "metacognition", "evidencias"]) {
+      for (const card of topic[section] || []) {
+        if (typeof card.imageData === "string" && card.imageData.startsWith("assets/")) {
+          card.imageAsset = card.imageData;
+          delete card.imageData;
+          changed = true;
+        } else if (typeof card.imageData === "string" && card.imageData.startsWith("data:")) {
+          await persistLegacyData(card, "imageData", "imageFileId", "imageName", "imageType");
+        }
+      }
+    }
+  }
+
+  for (const record of workingDatabase.practiceFiles || []) {
+    if (typeof record.data === "string" && (record.data.startsWith("data:") || record.data.startsWith("assets/"))) {
+      record.fileId = record.fileId || record.id || generateUniqueId("file");
+      await persistLegacyData(record, "data", "fileId", "name", "type");
+    }
+  }
+
+  for (const record of [...(workingDatabase.workshops || []), ...(workingDatabase.exams || []), ...(workingDatabase.learnings || [])]) {
+    for (const attachment of record.files || []) {
+      if (typeof attachment.data === "string" && (attachment.data.startsWith("data:") || attachment.data.startsWith("assets/"))) {
+        await persistLegacyData(attachment, "data", "fileId", "name", "type");
+      }
+    }
+  }
+
+  if (changed) {
+    if (sourceDatabase === appDB) {
+      const previousDatabase = appDB;
+      appDB = workingDatabase;
+      if (!saveDatabase()) {
+        appDB = previousDatabase;
+        throw new Error("Los archivos se copiaron a IndexedDB, pero no se pudo guardar la migración en LocalStorage.");
+      }
+    } else {
+      for (const key of Object.keys(sourceDatabase)) delete sourceDatabase[key];
+      Object.assign(sourceDatabase, workingDatabase);
+    }
+  }
+  return changed;
+}
+
+async function saveUploadedFile(file, imagesOnly = false, existingFileId = null) {
+  const processed = await processUploadFile(file, imagesOnly);
+  const fileId = existingFileId || generateUniqueId("file");
+  const saved = await FileStorage.saveBlob(fileId, file.name, processed.type, processed.size, processed.blob);
+  if (!saved) throw new Error("No se pudo guardar el archivo en IndexedDB. Comprueba el espacio disponible y vuelve a intentarlo.");
+  return { fileId, name: file.name, type: processed.type, size: processed.size, blob: processed.blob };
 }
 
 function formatBytes(bytes) {
@@ -383,7 +646,7 @@ const DEFAULT_DB = {
           id: "card-v-evi1",
           title: "Esquema Conceptual de Álgebra Vectorial en 2D",
           text: "Esquema analítico con descomposiciones cartesianas, cálculo de módulo por Pitágoras y regla del paralelogramo.",
-          imageData: "assets/imagenes/mapa_vectores.svg",
+          imageAsset: "assets/imagenes/mapa_vectores.svg",
           imageName: "mapa_vectores.svg"
         }
       ]
@@ -463,7 +726,7 @@ const DEFAULT_DB = {
           id: "card-c-evi1",
           title: "Corrección de Parcial: Proyectil con Desnivel",
           text: "Demostración gráfica de por qué la fórmula simplificada de alcance horizontal no aplica cuando el proyectil se lanza desde un acantilado.",
-          imageData: "assets/evidencias/correccion_parcial_tiro.svg",
+          imageAsset: "assets/evidencias/correccion_parcial_tiro.svg",
           imageName: "correccion_parcial_tiro.svg"
         }
       ]
@@ -543,7 +806,7 @@ const DEFAULT_DB = {
           id: "card-n-evi1",
           title: "Diagrama de Cuerpo Libre en Plano Inclinado",
           text: "Descomposición del peso en componentes paralela y normal, con fuerza de fricción cinética opuesta al deslizamiento.",
-          imageData: "assets/evidencias/dcl_plano_inclinado.svg",
+          imageAsset: "assets/evidencias/dcl_plano_inclinado.svg",
           imageName: "dcl_plano_inclinado.svg"
         }
       ]
@@ -556,7 +819,7 @@ const DEFAULT_DB = {
       type: "image/svg+xml",
       size: 14250,
       uploadDate: "2026-03-26",
-      data: "assets/imagenes/laboratorio_fotopuertas.svg"
+      assetPath: "assets/imagenes/laboratorio_fotopuertas.svg"
     },
     {
       id: "pfile-2",
@@ -564,7 +827,7 @@ const DEFAULT_DB = {
       type: "image/svg+xml",
       size: 18400,
       uploadDate: "2026-03-12",
-      data: "assets/evidencias/dcl_plano_inclinado.svg"
+      assetPath: "assets/evidencias/dcl_plano_inclinado.svg"
     },
     {
       id: "pfile-3",
@@ -572,7 +835,7 @@ const DEFAULT_DB = {
       type: "image/svg+xml",
       size: 21100,
       uploadDate: "2026-04-09",
-      data: "assets/imagenes/mapa_vectores.svg"
+      assetPath: "assets/imagenes/mapa_vectores.svg"
     }
   ],
   workshops: [
@@ -832,7 +1095,7 @@ function saveDatabase() {
     console.error("Error de guardado en LocalStorage:", err);
     setAutosaveUI("error");
     if (err.name === "QuotaExceededError" || err.code === 22) {
-      showToast("Memoria LocalStorage llena. Las imágenes grandes se guardan en IndexedDB.", "error");
+      showToast("LocalStorage está lleno; no se pudieron guardar los cambios del portafolio. Exporta un respaldo y libera espacio.", "error");
     }
     return false;
   }
@@ -873,7 +1136,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) flushAutoSave();
 });
 
-function updateStorageMeter() {
+async function updateStorageMeter() {
   try {
     let totalBytes = 0;
     for (let key in localStorage) {
@@ -881,11 +1144,19 @@ function updateStorageMeter() {
         totalBytes += (localStorage[key].length + key.length) * 2;
       }
     }
-    const kbUsed = Math.round(totalBytes / 1024);
-    const maxKb = 5000;
-    const percentage = Math.min(100, Math.max(1, Math.round((kbUsed / maxKb) * 100)));
-
-    const usedText = `${kbUsed} KB / 5 MB`;
+    let usage = totalBytes;
+    let quota = 0;
+    let detail = `Uso local: ${formatBytes(totalBytes)}. Cuota del navegador no disponible.`;
+    if (navigator.storage && typeof navigator.storage.estimate === "function") {
+      const estimate = await navigator.storage.estimate();
+      usage = Number(estimate.usage) || totalBytes;
+      quota = Number(estimate.quota) || 0;
+      detail = quota
+        ? `Uso: ${formatBytes(usage)} de ${formatBytes(quota)} (${Math.min(100, Math.round((usage / quota) * 100))}%).`
+        : `Uso del navegador: ${formatBytes(usage)}. Cuota no disponible.`;
+    }
+    const percentage = quota ? Math.min(100, Math.max(1, Math.round((usage / quota) * 100))) : 1;
+    const usedText = quota ? `${formatBytes(usage)} / ${formatBytes(quota)}` : `${formatBytes(usage)} usados`;
     const sideText = document.getElementById("storageUsedText");
     const sideBar = document.getElementById("storageUsedBar");
     const detUsed = document.getElementById("storageDetailUsed");
@@ -893,7 +1164,7 @@ function updateStorageMeter() {
 
     if (sideText) sideText.textContent = usedText;
     if (sideBar) sideBar.style.width = `${percentage}%`;
-    if (detUsed) detUsed.textContent = `${kbUsed} KB (${percentage}% del límite estimado)`;
+    if (detUsed) detUsed.textContent = detail;
     if (detBar) detBar.style.width = `${percentage}%`;
   } catch (e) {
     console.warn("Error en monitor de almacenamiento:", e);
@@ -912,6 +1183,7 @@ function getTopicTitleById(topicId) {
 
 function navigateToView(viewName) {
   flushAutoSave();
+  revokeRenderedObjectUrls();
   currentView = viewName;
 
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
@@ -1230,6 +1502,7 @@ function showTopicDetail(topicId) {
 // ============================================================================
 
 function renderTopicDetail(topicId) {
+  revokeRenderedObjectUrls();
   const topic = appDB.topics.find(t => t.id === topicId);
   const container = document.getElementById("topicDetailContainer");
   if (!topic || !container) {
@@ -1389,6 +1662,7 @@ function renderTopicDetail(topicId) {
   `;
 
   container.innerHTML = html;
+  hydrateAcademicCardImages(container);
 
   // Renderizar KaTeX en fórmulas de las tarjetas
   renderKaTeX(container);
@@ -1412,7 +1686,8 @@ function renderTopicDetail(topicId) {
  * Soporta: solo texto, solo imagen, título+imagen, título+texto+imagen, etc.
  */
 function createAcademicCardHTML(card, section, topicId) {
-  const hasImage = Boolean(card.imageData);
+  const assetImage = typeof card.imageAsset === "string" && card.imageAsset.startsWith("assets/") ? card.imageAsset : "";
+  const hasImage = Boolean(card.imageFileId || assetImage);
   const hasTitle = Boolean(card.title && card.title.trim());
   const hasText = Boolean(card.text && card.text.trim());
   const hasLatex = Boolean(card.latex && card.latex.trim());
@@ -1421,7 +1696,7 @@ function createAcademicCardHTML(card, section, topicId) {
   if (hasImage) {
     imageBlock = `
       <div class="card-media-wrap" onclick="openCardImageViewer('${escapeHTML(topicId)}', '${section}', '${escapeHTML(card.id)}')">
-        <img src="${card.imageData}" alt="${escapeHTML(card.title || 'Evidencia')}" loading="lazy">
+        <img ${assetImage ? `src="${escapeHTML(assetImage)}"` : `data-image-file-id="${escapeHTML(card.imageFileId)}"`} alt="${escapeHTML(card.title || 'Evidencia')}" loading="lazy">
         <span class="card-media-overlay-zoom">🔍 Ampliar</span>
       </div>
     `;
@@ -1461,6 +1736,14 @@ function createAcademicCardHTML(card, section, topicId) {
   `;
 }
 
+async function hydrateAcademicCardImages(container) {
+  if (!container) return;
+  for (const image of container.querySelectorAll("img[data-image-file-id]")) {
+    const blob = await FileStorage.getBlob(image.dataset.imageFileId);
+    if (blob && image.isConnected) image.src = createTrackedObjectUrl(blob);
+  }
+}
+
 // ============================================================================
 // MODAL EDITOR DE TARJETA FLEXIBLE CON GUARDADO EN TIEMPO REAL
 // ============================================================================
@@ -1468,8 +1751,11 @@ function createAcademicCardHTML(card, section, topicId) {
 let currentActiveCard = null;
 let isNewCard = false;
 let currentActiveCardContext = { topicId: null, section: null };
+let cardEditorImageObjectUrl = null;
+let pendingCardFileDeletes = [];
 
 function openCardModal(section, cardId = null, topicId = null) {
+  pendingCardFileDeletes = [];
   const topic = appDB.topics.find(t => t.id === topicId);
   if (!topic) return;
 
@@ -1491,7 +1777,7 @@ function openCardModal(section, cardId = null, topicId = null) {
       title: "",
       text: "",
       latex: "",
-      imageData: null,
+      imageAsset: null,
       imageFileId: null,
       imageName: null
     };
@@ -1562,9 +1848,12 @@ function openCardModal(section, cardId = null, topicId = null) {
   // Botón para quitar imagen
   const removeImgBtn = document.getElementById("cardEditorRemoveImageBtn");
   removeImgBtn.onclick = () => {
+    if (currentActiveCard.imageFileId) pendingCardFileDeletes.push(currentActiveCard.imageFileId);
+    currentActiveCard.imageAsset = null;
     currentActiveCard.imageData = null;
     currentActiveCard.imageFileId = null;
     currentActiveCard.imageName = null;
+    currentActiveCard.imageType = null;
     renderCardEditorImageUI();
     showToast("Imagen eliminada de la tarjeta.", "info");
   };
@@ -1586,7 +1875,7 @@ function openCardModal(section, cardId = null, topicId = null) {
   openModal("cardEditorModal");
 }
 
-function saveCardEditorChanges() {
+async function saveCardEditorChanges() {
   const { topicId, section } = currentActiveCardContext;
   if (!topicId || !section || !currentActiveCard) {
     closeModal("cardEditorModal");
@@ -1611,7 +1900,7 @@ function saveCardEditorChanges() {
     (currentActiveCard.title && currentActiveCard.title.trim()) ||
     (currentActiveCard.text && currentActiveCard.text.trim()) ||
     (section === "formulas" && currentActiveCard.latex && currentActiveCard.latex.trim()) ||
-    currentActiveCard.imageData
+    currentActiveCard.imageAsset || currentActiveCard.imageData || currentActiveCard.imageFileId
   );
 
   if (isNewCard) {
@@ -1625,19 +1914,41 @@ function saveCardEditorChanges() {
   }
 
   saveDatabase();
+  if (pendingCardFileDeletes.length) {
+    const deleted = await FileStorage.deleteFiles(pendingCardFileDeletes);
+    if (!deleted) showToast("La tarjeta se guardó, pero no se pudieron limpiar todos los archivos antiguos.", "error");
+  }
+  pendingCardFileDeletes = [];
   closeModal("cardEditorModal");
   renderTopicDetail(topicId);
   updateNavBadges();
   showToast("✓ Tarjeta guardada correctamente.", "success");
 }
 
-function renderCardEditorImageUI() {
+async function renderCardEditorImageUI() {
   const currentWrap = document.getElementById("cardEditorImageCurrentWrap");
   const uploadWrap = document.getElementById("cardEditorImageUploadWrap");
   const previewImg = document.getElementById("cardEditorImageCurrentPreview");
 
-  if (currentActiveCard && currentActiveCard.imageData) {
-    previewImg.src = currentActiveCard.imageData;
+  if (cardEditorImageObjectUrl) {
+    URL.revokeObjectURL(cardEditorImageObjectUrl);
+    renderedFileObjectUrls.delete(cardEditorImageObjectUrl);
+    cardEditorImageObjectUrl = null;
+  }
+
+  const assetImage = currentActiveCard?.imageAsset?.startsWith("assets/") ? currentActiveCard.imageAsset : "";
+  if (currentActiveCard && (currentActiveCard.imageFileId || assetImage)) {
+    if (assetImage) {
+      previewImg.src = assetImage;
+    } else {
+      const blob = await FileStorage.getBlob(currentActiveCard.imageFileId);
+      if (!blob) {
+        showToast("No se encontró la imagen guardada en IndexedDB.", "error");
+        return;
+      }
+      cardEditorImageObjectUrl = createTrackedObjectUrl(blob);
+      previewImg.src = cardEditorImageObjectUrl;
+    }
     currentWrap.classList.remove("hidden");
     uploadWrap.classList.add("hidden");
   } else {
@@ -1646,25 +1957,22 @@ function renderCardEditorImageUI() {
   }
 }
 
-function handleCardImageUpload(file) {
+async function handleCardImageUpload(file) {
   if (!file || !currentActiveCard) return;
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const dataUrl = e.target.result;
-    const fileId = generateUniqueId("img");
-
-    // Guardar en IndexedDB para persistencia segura de gran tamaño
-    await FileStorage.saveFile(fileId, file.name, file.type, file.size, dataUrl);
-
-    currentActiveCard.imageData = dataUrl;
-    currentActiveCard.imageFileId = fileId;
-    currentActiveCard.imageName = file.name;
-
-    renderCardEditorImageUI();
+  try {
+    const uploaded = await saveUploadedFile(file, true);
+    if (currentActiveCard.imageFileId) pendingCardFileDeletes.push(currentActiveCard.imageFileId);
+    currentActiveCard.imageFileId = uploaded.fileId;
+    currentActiveCard.imageAsset = null;
+    currentActiveCard.imageData = null;
+    currentActiveCard.imageName = uploaded.name;
+    currentActiveCard.imageType = uploaded.type;
+    await renderCardEditorImageUI();
     scheduleAutoSave(0);
     showToast(`✓ Imagen "${file.name}" adjuntada y guardada.`, "success");
-  };
-  reader.readAsDataURL(file);
+  } catch (error) {
+    showToast(error.message, "error");
+  }
 }
 
 function updateCardEditorLatexPreview(code) {
@@ -1753,36 +2061,32 @@ function initPracticasDropzone() {
 }
 
 function handlePracticesBatchUpload(fileList) {
-  Array.from(fileList).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const dataUrl = e.target.result;
-      const fileId = generateUniqueId("prac_file");
-
-      // Guardar en IndexedDB
-      await FileStorage.saveFile(fileId, file.name, file.type, file.size, dataUrl);
-
-      if (!Array.isArray(appDB.practiceFiles)) appDB.practiceFiles = [];
-
-      appDB.practiceFiles.unshift({
-        id: fileId,
-        name: file.name,
-        type: file.type || (file.name.endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
-        size: file.size,
-        uploadDate: new Date().toISOString().slice(0, 10),
-        data: dataUrl
-      });
-
-      scheduleAutoSave(0);
-      renderPracticasFilesList();
-      updateNavBadges();
-      showToast(`✓ Archivo "${file.name}" subido y guardado.`, "success");
-    };
-    reader.readAsDataURL(file);
-  });
+  return (async () => {
+    for (const file of Array.from(fileList)) {
+      try {
+        const uploaded = await saveUploadedFile(file);
+        if (!Array.isArray(appDB.practiceFiles)) appDB.practiceFiles = [];
+        appDB.practiceFiles.unshift({
+          id: generateUniqueId("practice"),
+          fileId: uploaded.fileId,
+          name: uploaded.name,
+          type: uploaded.type,
+          size: uploaded.size,
+          uploadDate: new Date().toISOString().slice(0, 10)
+        });
+        showToast(`✓ Archivo "${file.name}" subido y guardado.`, "success");
+      } catch (error) {
+        showToast(`No se cargó "${file.name}": ${error.message}`, "error");
+      }
+    }
+    saveDatabase();
+    renderPracticasFilesList();
+    updateNavBadges();
+  })();
 }
 
 function renderPracticasFilesList() {
+  revokeRenderedObjectUrls();
   const grid = document.getElementById("practiceFilesGrid");
   const empty = document.getElementById("practiceFilesEmptyState");
   const badge = document.getElementById("practiceFilesTotalBadge");
@@ -1814,7 +2118,7 @@ function renderPracticasFilesList() {
         <div class="practice-file-thumb" onclick="openPracticeViewer('${escapeHTML(f.id)}')">
           <span class="file-type-pill ${isPdf ? 'pdf' : ''}">${isPdf ? 'PDF' : 'IMAGEN'}</span>
           ${isImage ? `
-            <img src="${f.data || 'assets/imagenes/laboratorio_fotopuertas.svg'}" alt="${escapeHTML(f.name)}" loading="lazy">
+            <img ${f.fileId ? `data-practice-file-id="${escapeHTML(f.fileId)}"` : `src="${escapeHTML(f.assetPath || 'assets/imagenes/laboratorio_fotopuertas.svg')}"`} alt="${escapeHTML(f.name)}" loading="lazy">
           ` : `
             <div class="pdf-icon-display">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
@@ -1846,6 +2150,15 @@ function renderPracticasFilesList() {
       </div>
     `;
   }).join("");
+  hydratePracticeImages(grid);
+}
+
+async function hydratePracticeImages(grid) {
+  if (!grid) return;
+  for (const image of grid.querySelectorAll("img[data-practice-file-id]")) {
+    const blob = await FileStorage.getBlob(image.dataset.practiceFileId);
+    if (blob && image.isConnected) image.src = createTrackedObjectUrl(blob);
+  }
 }
 
 function replacePracticeFile(fileId, newFile) {
@@ -1853,35 +2166,32 @@ function replacePracticeFile(fileId, newFile) {
   const fileRecord = appDB.practiceFiles.find(f => f.id === fileId);
   if (!fileRecord) return;
 
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const dataUrl = e.target.result;
-    await FileStorage.saveFile(fileId, newFile.name, newFile.type, newFile.size, dataUrl);
-
-    fileRecord.name = newFile.name;
-    fileRecord.type = newFile.type;
-    fileRecord.size = newFile.size;
-    fileRecord.data = dataUrl;
+  saveUploadedFile(newFile, false, fileRecord.fileId || fileRecord.id).then(uploaded => {
+    fileRecord.fileId = uploaded.fileId;
+    fileRecord.name = uploaded.name;
+    fileRecord.type = uploaded.type;
+    fileRecord.size = uploaded.size;
     fileRecord.uploadDate = new Date().toISOString().slice(0, 10);
-
-    scheduleAutoSave(0);
+    delete fileRecord.data;
+    saveDatabase();
     renderPracticasFilesList();
     showToast(`✓ Archivo reemplazado por "${newFile.name}".`, "success");
-  };
-  reader.readAsDataURL(newFile);
+  }).catch(error => showToast(error.message, "error"));
 }
 
-function downloadFileDirectly(filename, dataUrl) {
-  if (!dataUrl) {
+function downloadFileDirectly(filename, fileOrUrl) {
+  if (!fileOrUrl) {
     showToast("Archivo no disponible para descarga local directa.", "info");
     return;
   }
   const a = document.createElement("a");
-  a.href = dataUrl;
+  const generatedUrl = fileOrUrl instanceof Blob ? URL.createObjectURL(fileOrUrl) : "";
+  a.href = generatedUrl || fileOrUrl;
   a.download = filename || "archivo_practica";
   document.body.appendChild(a);
   a.click();
   a.remove();
+  if (generatedUrl) setTimeout(() => URL.revokeObjectURL(generatedUrl), 1000);
 }
 
 // ============================================================================
@@ -1947,15 +2257,6 @@ function setupModalFilesAttachment(inputElId, previewElId, item) {
   const preview = document.getElementById(previewElId);
   if (!input || !preview || !item) return;
 
-  if (["workshopFormFiles", "examFormFiles", "learningFormFiles"].includes(inputElId)) {
-    const box = input.closest(".file-uploader-box");
-    const formGroup = input.closest(".form-group");
-    if (box) box.style.display = "none";
-    if (formGroup) formGroup.style.display = "none";
-    if (preview) preview.style.display = "none";
-    return;
-  }
-
   if (!Array.isArray(item.files)) item.files = [];
 
   const renderPreviews = () => {
@@ -1974,8 +2275,22 @@ function setupModalFilesAttachment(inputElId, previewElId, item) {
       btn.onclick = (e) => {
         e.preventDefault();
         const index = parseInt(btn.getAttribute("data-index"), 10);
+        const removed = item.files[index];
+        if (removed?.fileId || removed?.id) {
+          FileStorage.deleteFile(removed.fileId || removed.id).then(deleted => {
+            if (!deleted) {
+              showToast("No se pudo borrar el adjunto de IndexedDB; sigue asociado al registro.", "error");
+              return;
+            }
+            item.files.splice(index, 1);
+            renderPreviews();
+            scheduleAutoSave(0);
+          });
+          return;
+        }
         item.files.splice(index, 1);
         renderPreviews();
+        scheduleAutoSave(0);
       };
     });
   };
@@ -1985,21 +2300,18 @@ function setupModalFilesAttachment(inputElId, previewElId, item) {
   input.onchange = (e) => {
     if (!e.target.files || e.target.files.length === 0) return;
     Array.from(e.target.files).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-        const fileId = generateUniqueId("att");
-        await FileStorage.saveFile(fileId, file.name, file.type, file.size, evt.target.result);
+      saveUploadedFile(file).then(uploaded => {
         item.files.push({
-          id: fileId,
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          data: evt.target.result
+          id: generateUniqueId("attachment"),
+          fileId: uploaded.fileId,
+          name: uploaded.name,
+          type: uploaded.type,
+          size: uploaded.size
         });
         renderPreviews();
+        scheduleAutoSave(0);
         showToast(`Archivo "${file.name}" adjuntado.`, "success");
-      };
-      reader.readAsDataURL(file);
+      }).catch(error => showToast(`No se adjuntó "${file.name}": ${error.message}`, "error"));
     });
     input.value = "";
   };
@@ -2525,7 +2837,7 @@ function openItemViewerModal(type, itemId) {
           <h4>Hojas de Trabajo y Archivos Adjuntos:</h4>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
             ${w.files.map(f => `
-              <button class="btn btn-outline btn-sm" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${escapeHTML(f.data)}')">
+              <button class="btn btn-outline btn-sm" onclick="openStoredFileViewer('${escapeHTML(f.fileId || f.id)}', '${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${escapeHTML(f.data || '')}')">
                 📎 ${escapeHTML(f.name)} (${formatBytes(f.size)})
               </button>
             `).join("")}
@@ -2584,7 +2896,7 @@ function openItemViewerModal(type, itemId) {
           <h4>Archivos y Evaluaciones Adjuntas:</h4>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
             ${e.files.map(f => `
-              <button class="btn btn-outline btn-sm" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${escapeHTML(f.data)}')">
+              <button class="btn btn-outline btn-sm" onclick="openStoredFileViewer('${escapeHTML(f.fileId || f.id)}', '${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${escapeHTML(f.data || '')}')">
                 📎 ${escapeHTML(f.name)} (${formatBytes(f.size)})
               </button>
             `).join("")}
@@ -2643,7 +2955,7 @@ function openItemViewerModal(type, itemId) {
           <h4>Archivos y Apuntes Adjuntos:</h4>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
             ${l.files.map(f => `
-              <button class="btn btn-outline btn-sm" onclick="openFileViewer('${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${escapeHTML(f.data)}')">
+              <button class="btn btn-outline btn-sm" onclick="openStoredFileViewer('${escapeHTML(f.fileId || f.id)}', '${escapeHTML(f.name)}', '${escapeHTML(f.type)}', '${escapeHTML(f.data || '')}')">
                 📎 ${escapeHTML(f.name)} (${formatBytes(f.size)})
               </button>
             `).join("")}
@@ -2684,7 +2996,28 @@ function confirmDelete(type, id, extra = null) {
   openModal("confirmModal");
 }
 
-function executeDelete() {
+function getStoredFileIds(record, includeTopicCards = false) {
+  const ids = [];
+  (record?.files || []).forEach(file => ids.push(file.fileId || file.id));
+  if (record?.fileId) ids.push(record.fileId);
+  if (includeTopicCards) {
+    for (const section of ["definitions", "formulas", "metacognition", "evidencias"]) {
+      for (const card of record?.[section] || []) {
+        if (card.imageFileId) ids.push(card.imageFileId);
+        (card.files || []).forEach(file => ids.push(file.fileId || file.id));
+      }
+    }
+  }
+  return [...new Set(ids.filter(Boolean))];
+}
+
+async function deleteStoredFiles(ids) {
+  const success = await FileStorage.deleteFiles(ids);
+  if (!success) showToast("No se pudieron borrar los archivos de IndexedDB; el registro se conserva. Inténtalo nuevamente.", "error");
+  return success;
+}
+
+async function executeDelete() {
   if (!currentConfirmAction) return;
 
   if (currentConfirmAction.type === "custom") {
@@ -2699,6 +3032,8 @@ function executeDelete() {
   const { type, id, extra } = currentConfirmAction;
 
   if (type === "topic") {
+    const topic = appDB.topics.find(t => t.id === id);
+    if (!(await deleteStoredFiles(getStoredFileIds(topic, true)))) return;
     appDB.topics = appDB.topics.filter(t => t.id !== id);
     if (activeDetailTopicId === id) navigateToView("temas");
     renderTemas();
@@ -2707,24 +3042,33 @@ function executeDelete() {
     const { topicId, section } = extra;
     const topic = appDB.topics.find(t => t.id === topicId);
     if (topic && Array.isArray(topic[section])) {
+      const card = topic[section].find(c => c.id === id);
+      if (card?.imageFileId && !(await deleteStoredFiles([card.imageFileId]))) return;
       topic[section] = topic[section].filter(c => c.id !== id);
       renderTopicDetail(topicId);
       showToast("Tarjeta eliminada.", "info");
     }
   } else if (type === "practiceFile") {
+    const file = (appDB.practiceFiles || []).find(f => f.id === id);
+    if (file && !(await deleteStoredFiles([file.fileId || file.id]))) return;
     appDB.practiceFiles = (appDB.practiceFiles || []).filter(f => f.id !== id);
-    FileStorage.deleteFile(id);
     renderPracticasFilesList();
     showToast("Archivo de práctica eliminado.", "info");
   } else if (type === "workshop") {
+    const workshop = appDB.workshops.find(w => w.id === id);
+    if (!(await deleteStoredFiles(getStoredFileIds(workshop)))) return;
     appDB.workshops = appDB.workshops.filter(w => w.id !== id);
     renderTalleres();
     showToast("Taller eliminado.", "info");
   } else if (type === "exam") {
+    const exam = appDB.exams.find(e => e.id === id);
+    if (!(await deleteStoredFiles(getStoredFileIds(exam)))) return;
     appDB.exams = appDB.exams.filter(e => e.id !== id);
     renderParciales();
     showToast("Parcial eliminado.", "info");
   } else if (type === "learning") {
+    const learning = appDB.learnings.find(l => l.id === id);
+    if (!(await deleteStoredFiles(getStoredFileIds(learning)))) return;
     appDB.learnings = appDB.learnings.filter(l => l.id !== id);
     renderAprendizaje();
     showToast("Situación eliminada.", "info");
@@ -2744,8 +3088,18 @@ let fileViewerObjectUrl = null;
 let fileViewerRequestId = 0;
 
 async function openFileViewer(name, type, data) {
-  const safeValue = safeObjectUrl(data, "");
-  if (!safeValue) {
+  const isPdf = (type && type.includes("pdf")) || (name && name.toLowerCase().endsWith(".pdf"));
+  let fileBlob = data instanceof Blob ? data : null;
+  let safeValue = typeof data === "string" ? safeObjectUrl(data, "") : "";
+  if (!fileBlob && safeValue.startsWith("data:")) fileBlob = dataUrlToBlob(safeValue, type);
+  if (!fileBlob && safeValue.startsWith("blob:")) {
+    try {
+      fileBlob = await (await fetch(safeValue)).blob();
+    } catch (error) {
+      fileBlob = null;
+    }
+  }
+  if (!fileBlob && !safeValue) {
     showToast("No hay vista previa disponible para este archivo.", "info");
     return;
   }
@@ -2758,47 +3112,19 @@ async function openFileViewer(name, type, data) {
 
   document.getElementById("fileViewerTitle").textContent = name || "Vista de Archivo";
   const body = document.getElementById("fileViewerBody");
-  const isPdf = (type && type.includes("pdf")) || (name && name.toLowerCase().endsWith(".pdf"));
+  const previewUrl = fileBlob ? (fileViewerObjectUrl = URL.createObjectURL(fileBlob)) : safeValue;
 
   if (isPdf) {
-    body.innerHTML = '<p class="text-muted" role="status">Preparando vista previa del PDF...</p>';
-    openModal("fileViewerModal");
-
-    try {
-      let pdfBlob;
-      if (safeValue.startsWith("data:")) {
-        const commaIndex = safeValue.indexOf(",");
-        if (commaIndex === -1) throw new Error("El PDF tiene un data URL inválido.");
-        const metadata = safeValue.slice(0, commaIndex);
-        const payload = safeValue.slice(commaIndex + 1);
-        const binary = /;base64/i.test(metadata) ? atob(payload) : decodeURIComponent(payload);
-        const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
-        pdfBlob = new Blob([bytes], { type: "application/pdf" });
-      } else {
-        const response = await fetch(safeValue);
-        if (!response.ok) throw new Error(`No se pudo cargar el PDF (${response.status}).`);
-        pdfBlob = await response.blob();
-      }
-      if (requestId !== fileViewerRequestId) return;
-
-      fileViewerObjectUrl = URL.createObjectURL(new Blob([pdfBlob], { type: "application/pdf" }));
-      body.innerHTML = `
-        <iframe title="Vista previa: ${escapeHTML(name || "documento PDF")}" src="${fileViewerObjectUrl}" style="width: 100%; height: 70vh; min-height: 420px; border: 0; background: #fff;"></iframe>
-      `;
-    } catch (error) {
-      if (requestId !== fileViewerRequestId) return;
-      body.innerHTML = `
-        <div style="padding: 24px; text-align: center;">
-          <p>No se pudo mostrar la vista previa de este PDF.</p>
-          <a href="${safeValue}" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Abrir PDF en pestaña nueva</a>
-        </div>
-      `;
-      console.error("Error al preparar la vista previa del PDF:", error);
+    if (!fileBlob) {
+      showToast("El PDF guardado no está disponible en IndexedDB.", "error");
+      return;
     }
+    openModal("fileViewerModal");
+    body.innerHTML = `<iframe title="Vista previa: ${escapeHTML(name || "documento PDF")}" src="${previewUrl}" style="width: 100%; height: 70vh; min-height: 420px; border: 0; background: #fff;"></iframe>`;
   } else {
     body.innerHTML = `
       <div style="display: flex; justify-content: center; align-items: center; max-height: 70vh; overflow: auto;">
-        <img src="${safeValue}" alt="${escapeHTML(name)}" style="max-width: 100%; max-height: 68vh; object-fit: contain; border-radius: 8px;">
+        <img src="${previewUrl}" alt="${escapeHTML(name)}" style="max-width: 100%; max-height: 68vh; object-fit: contain; border-radius: 8px;">
       </div>
     `;
     openModal("fileViewerModal");
@@ -2806,11 +3132,11 @@ async function openFileViewer(name, type, data) {
 
   const downloadBtn = document.getElementById("fileViewerDownloadBtn");
   if (downloadBtn) {
-    downloadBtn.href = safeValue;
+    downloadBtn.href = previewUrl;
     downloadBtn.setAttribute("download", String(name || "archivo"));
     downloadBtn.onclick = (event) => {
       event.preventDefault();
-      downloadFileDirectly(name, safeValue);
+      downloadFileDirectly(name, fileBlob || safeValue);
     };
   }
 
@@ -2830,37 +3156,50 @@ function closeConfirmDialog() {
   currentConfirmAction = null;
 }
 
-function openCardImageViewer(topicId, section, cardId) {
+async function openCardImageViewer(topicId, section, cardId) {
   const topic = appDB.topics.find(t => t.id === topicId);
   if (!topic || !Array.isArray(topic[section])) return;
   const card = topic[section].find(c => c.id === cardId);
-  if (!card || !card.imageData) {
+  if (!card || (!card.imageAsset && !card.imageData && !card.imageFileId)) {
     showToast("No hay imagen adjunta en esta tarjeta.", "info");
     return;
   }
-  openFileViewer(card.title || "Evidencia Gráfica", "image/jpeg", card.imageData);
+  if (card.imageFileId) {
+    const blob = await FileStorage.getBlob(card.imageFileId);
+    if (!blob) return showToast("No se encontró la imagen en IndexedDB.", "error");
+    openFileViewer(card.imageName || card.title || "Evidencia Gráfica", card.imageType || blob.type, blob);
+  } else {
+    openFileViewer(card.title || "Evidencia Gráfica", "image/jpeg", card.imageAsset || card.imageData);
+  }
 }
 
 async function openPracticeViewer(fileId) {
   const f = (appDB.practiceFiles || []).find(x => x.id === fileId);
   if (!f) return;
-  let data = f.data;
-  if (!data && f.id) {
-    const fromStorage = await FileStorage.getFile(f.id);
-    if (fromStorage && fromStorage.data) data = fromStorage.data;
-  }
-  openFileViewer(f.name, f.type, data);
+  const blob = await FileStorage.getBlob(f.fileId || f.id);
+  if (!blob && f.assetPath?.startsWith("assets/")) return openFileViewer(f.name, f.type, f.assetPath);
+  if (!blob) return showToast("No se encontró el archivo en IndexedDB.", "error");
+  openFileViewer(f.name, f.type, blob);
 }
 
 async function downloadPracticeFile(fileId) {
   const f = (appDB.practiceFiles || []).find(x => x.id === fileId);
   if (!f) return;
-  let data = f.data;
-  if (!data && f.id) {
-    const fromStorage = await FileStorage.getFile(f.id);
-    if (fromStorage && fromStorage.data) data = fromStorage.data;
+  const blob = await FileStorage.getBlob(f.fileId || f.id);
+  if (!blob && f.assetPath?.startsWith("assets/")) return downloadFileDirectly(f.name, f.assetPath);
+  if (!blob) return showToast("No se encontró el archivo en IndexedDB.", "error");
+  downloadFileDirectly(f.name, blob);
+}
+
+async function openStoredFileViewer(fileId, name, type, assetFallback = "") {
+  const blob = await FileStorage.getBlob(fileId);
+  if (!blob) {
+    if (typeof assetFallback === "string" && assetFallback.startsWith("assets/")) {
+      return openFileViewer(name, type, assetFallback);
+    }
+    return showToast("No se encontró el archivo en IndexedDB.", "error");
   }
-  downloadFileDirectly(f.name, data);
+  openFileViewer(name, type || blob.type, blob);
 }
 
 // ============================================================================
@@ -2877,6 +3216,18 @@ function openModal(modalId) {
 }
 
 function closeModal(modalId) {
+  if (modalId === "cardEditorModal" && cardEditorImageObjectUrl) {
+    URL.revokeObjectURL(cardEditorImageObjectUrl);
+    renderedFileObjectUrls.delete(cardEditorImageObjectUrl);
+    cardEditorImageObjectUrl = null;
+  }
+  if (modalId === "fileViewerModal") {
+    fileViewerRequestId++;
+    if (fileViewerObjectUrl) {
+      URL.revokeObjectURL(fileViewerObjectUrl);
+      fileViewerObjectUrl = null;
+    }
+  }
   const modal = document.getElementById(modalId);
   if (modal) {
     modal.classList.remove("open");
@@ -2896,27 +3247,48 @@ function closeModal(modalId) {
 async function exportBackupJSON() {
   flushAutoSave();
   showToast("Preparando exportación completa con archivos...", "info");
+  try {
+    await migrateEmbeddedFilesToIndexedDB();
+    const records = await FileStorage.getAllFiles();
+    const files = [];
+    for (const record of records) {
+      const storedBlob = record.blob instanceof Blob ? record.blob : (record.data instanceof Blob ? record.data : null);
+      const data = storedBlob ? await blobToDataUrl(storedBlob) : (typeof record.data === "string" ? record.data : null);
+      if (data) {
+        files.push({
+          id: record.id,
+          name: record.name || "archivo",
+          type: record.type || storedBlob?.type || "application/octet-stream",
+          size: Number(record.size || storedBlob?.size || 0),
+          data
+        });
+      }
+    }
+    const availableIds = new Set(files.map(file => file.id));
+    const missingIds = getReferencedFileIds().filter(id => !availableIds.has(id));
+    if (missingIds.length) throw new Error(`Faltan ${missingIds.length} archivo(s) en IndexedDB; no se generó un respaldo incompleto.`);
 
-  const files = await FileStorage.getAllFiles();
-  const payload = {
-    app: "Portafolio Digital de Física I",
-    version: "3.5",
-    exportedAt: new Date().toISOString(),
-    db: appDB,
-    storedFiles: files
-  };
-
-  const jsonStr = JSON.stringify(payload, null, 2);
-  const blob = new Blob([jsonStr], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `Portafolio_Fisica_I_Respaldo_${new Date().toISOString().slice(0, 10)}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  showToast("✓ Copia de seguridad exportada con éxito.", "success");
+    const payload = {
+      app: "Portafolio Digital de Física I",
+      version: "4.0",
+      exportedAt: new Date().toISOString(),
+      db: appDB,
+      storedFiles: files
+    };
+    const jsonStr = JSON.stringify(payload, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Portafolio_Fisica_I_Respaldo_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast("✓ Copia de seguridad exportada con éxito.", "success");
+  } catch (error) {
+    showToast(error.message || "No se pudo generar el respaldo completo.", "error");
+  }
 }
 
 function validateImportedPayload(data) {
@@ -2979,17 +3351,28 @@ function importBackupJSON(file) {
 
       const summary = `Temas: ${normalized.topics.length} · Talleres: ${normalized.workshops.length} · Parciales: ${normalized.exams.length} · Archivos: ${normalized.practiceFiles.length}`;
       openCustomConfirmDialog(`Esto reemplaza todo tu trabajo actual. ${summary}. ¿Deseas continuar?`, async () => {
-        if (Array.isArray(data.storedFiles)) {
-          for (const f of data.storedFiles) {
-            if (f && f.id && f.data) {
-              await FileStorage.saveFile(f.id, String(f.name || "archivo"), String(f.type || "application/octet-stream"), Number(f.size || 0), String(f.data));
-            }
+        const previousDb = appDB;
+        try {
+          await FileStorage.init();
+          for (const storedFile of Array.isArray(data.storedFiles) ? data.storedFiles : []) {
+            if (!storedFile?.id) continue;
+            const type = String(storedFile.type || "application/octet-stream");
+            let blob = storedFile.blob instanceof Blob ? storedFile.blob : null;
+            if (!blob && typeof storedFile.data === "string") blob = dataUrlToBlob(storedFile.data, type);
+            if (!blob) throw new Error(`El adjunto "${storedFile.name || storedFile.id}" no tiene datos válidos en el respaldo.`);
+            const saved = await FileStorage.saveBlob(storedFile.id, String(storedFile.name || "archivo"), type, Number(storedFile.size || blob.size), blob);
+            if (!saved) throw new Error(`No se pudo restaurar "${storedFile.name || storedFile.id}" en IndexedDB.`);
           }
+
+          appDB = sanitizePortfolioDatabase(normalized);
+          await migrateEmbeddedFilesToIndexedDB();
+          if (!saveDatabase()) throw new Error("No se pudieron guardar los datos importados en LocalStorage.");
+          renderApp();
+          showToast("✓ Portafolio restaurado correctamente desde el respaldo.", "success");
+        } catch (error) {
+          appDB = previousDb;
+          showToast(error.message || "No se pudo restaurar el respaldo.", "error");
         }
-        appDB = sanitizePortfolioDatabase(normalized);
-        saveDatabase();
-        renderApp();
-        showToast("✓ Portafolio restaurado correctamente desde el respaldo.", "success");
       });
     } catch (err) {
       console.error("Error al importar JSON:", err);
@@ -3017,7 +3400,12 @@ function restoreDefaultData() {
 }
 
 function clearAllData() {
-  openCustomConfirmDialog("Esto elimina todos los datos guardados en este navegador. ¿Deseas continuar?", () => {
+  openCustomConfirmDialog("Esto elimina todos los datos y archivos guardados en este navegador. ¿Deseas continuar?", async () => {
+    const cleared = await FileStorage.clear();
+    if (!cleared) {
+      showToast("No se pudo limpiar IndexedDB; tus datos no se borraron.", "error");
+      return;
+    }
     appDB = createEmptyDatabase();
     saveDatabase();
     renderApp();
@@ -3062,6 +3450,19 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Inicializar IndexedDB en segundo plano
   await FileStorage.init();
+  if (navigator.storage && typeof navigator.storage.persist === "function") {
+    try {
+      Promise.resolve(navigator.storage.persist()).catch(error => console.info("El navegador no concedió almacenamiento persistente:", error));
+    } catch (error) {
+      console.info("No se pudo solicitar almacenamiento persistente:", error);
+    }
+  }
+  try {
+    await migrateEmbeddedFilesToIndexedDB();
+  } catch (error) {
+    console.error("No se pudo completar la migración de archivos:", error);
+    showToast(error.message || "No se pudieron migrar algunos archivos. No se borraron los datos originales.", "error");
+  }
 
   // Enlazar navegación de la barra lateral
   document.querySelectorAll(".nav-item").forEach(btn => {

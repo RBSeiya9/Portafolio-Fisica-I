@@ -104,8 +104,8 @@
     <!-- Indicador de almacenamiento LocalStorage -->
     <div class="sidebar-storage">
       <div class="storage-info">
-        <span class="storage-label">Almacenamiento Local</span>
-        <span class="storage-value" id="storageUsedText">0 KB / 5 MB</span>
+        <span class="storage-label">Almacenamiento del navegador</span>
+        <span class="storage-value" id="storageUsedText">Consultando uso...</span>
       </div>
       <div class="storage-bar">
         <div class="storage-fill" id="storageUsedBar" style="width: 2%;"></div>
@@ -413,7 +413,7 @@
             <label class="btn btn-primary file-input-label">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
               <span>＋ Subir Archivo</span>
-              <input type="file" id="practiceHeaderFileInput" accept=".pdf, image/*" multiple>
+              <input type="file" id="practiceHeaderFileInput" accept=".png,.jpg,.jpeg,.webp,.pdf" multiple>
             </label>
           </div>
         </div>
@@ -428,15 +428,15 @@
           <div class="dropzone-buttons">
             <label class="btn btn-outline btn-sm file-input-label">
               📷 Subir Fotografías / Imágenes
-              <input type="file" id="practiceImagesBtnInput" accept="image/png, image/jpeg, image/jpg, image/webp" multiple>
+              <input type="file" id="practiceImagesBtnInput" accept="image/png, image/jpeg, image/webp" multiple>
             </label>
             <label class="btn btn-outline btn-sm file-input-label">
               📄 Subir Documentos PDF
               <input type="file" id="practicePdfsBtnInput" accept="application/pdf" multiple>
             </label>
             <label class="btn btn-outline btn-sm file-input-label">
-              📎 Seleccionar Cualquier Archivo
-              <input type="file" id="practiceAnyBtnInput" accept=".pdf, image/*" multiple>
+              📎 Seleccionar otro archivo admitido
+              <input type="file" id="practiceAnyBtnInput" accept=".png,.jpg,.jpeg,.webp,.pdf" multiple>
             </label>
           </div>
         </div>
@@ -677,12 +677,12 @@
             <p>Monitoreo del uso de memoria local en el navegador actual.</p>
             <div class="storage-metric-box">
               <div class="storage-metric-row">
-                <span>Espacio ocupado estimado:</span>
-                <strong id="storageDetailUsed">0 KB</strong>
+                <span>Uso del almacenamiento:</span>
+                <strong id="storageDetailUsed">Consultando cuota disponible...</strong>
               </div>
               <div class="storage-metric-row">
-                <span>Límite aproximado del navegador:</span>
-                <strong>5,000 KB (5 MB)</strong>
+                <span>Cuota del navegador:</span>
+                <strong>Cuota asignada por el navegador</strong>
               </div>
               <div class="storage-bar large-bar">
                 <div class="storage-fill" id="storageDetailBar" style="width: 2%;"></div>
@@ -783,11 +783,11 @@
             <div class="form-group">
               <label>Mapa Conceptual o Esquema Gráfico (Imagen o Documento PDF)</label>
               <div class="file-uploader-box">
-                <input type="file" id="topicFormMapFile" accept="image/*,.pdf" class="file-hidden-input">
+                <input type="file" id="topicFormMapFile" accept=".png,.jpg,.jpeg,.webp,.pdf" class="file-hidden-input">
                 <div class="uploader-prompt">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                   <span>Haz clic aquí para seleccionar imagen o PDF del mapa conceptual</span>
-                  <small>Archivos menores a 1.5 MB recomendados para LocalStorage</small>
+                  <small>Fotos y PDF admitidos hasta 10 MB por archivo; se guardan en IndexedDB</small>
                 </div>
               </div>
               <div id="topicMapFilePreview" class="attached-items-list"></div>
@@ -877,7 +877,7 @@
                 <div class="card-image-preview-actions">
                   <label class="btn btn-outline btn-sm file-input-label">
                     🔄 Cambiar imagen
-                    <input type="file" id="cardEditorImageChangeInput" accept="image/png, image/jpeg, image/jpg, image/webp, image/svg+xml">
+                    <input type="file" id="cardEditorImageChangeInput" accept="image/png, image/jpeg, image/webp">
                   </label>
                   <button type="button" class="btn btn-danger-outline btn-sm" id="cardEditorRemoveImageBtn">
                     🗑 Quitar imagen
@@ -890,8 +890,8 @@
                 <label class="card-image-upload-box file-input-label">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
                   <span>Hacer clic para adjuntar foto o imagen</span>
-                  <span class="sub-hint">PNG, JPG, JPEG, WEBP o SVG</span>
-                  <input type="file" id="cardEditorImageNewInput" accept="image/png, image/jpeg, image/jpg, image/webp, image/svg+xml">
+                  <span class="sub-hint">PNG, JPG, JPEG o WEBP, hasta 10 MB</span>
+                  <input type="file" id="cardEditorImageNewInput" accept="image/png, image/jpeg, image/webp">
                 </label>
               </div>
             </div>
@@ -987,7 +987,7 @@
             <div class="form-group">
               <label>Imágenes o Documentos Adjuntos (Hojas de trabajo / Gráficos)</label>
               <div class="file-uploader-box">
-                <input type="file" id="workshopFormFiles" multiple accept="image/*,.pdf" class="file-hidden-input">
+                <input type="file" id="workshopFormFiles" multiple accept=".png,.jpg,.jpeg,.webp,.pdf" class="file-hidden-input">
                 <div class="uploader-prompt">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                   <span>Haz clic para adjuntar hojas de desarrollo resuelto</span>
@@ -1084,7 +1084,7 @@
             <div class="form-group">
               <label>Imágenes o Documentos Adjuntos (Foto del examen calificado / Scan)</label>
               <div class="file-uploader-box">
-                <input type="file" id="examFormFiles" multiple accept="image/*,.pdf" class="file-hidden-input">
+                <input type="file" id="examFormFiles" multiple accept=".png,.jpg,.jpeg,.webp,.pdf" class="file-hidden-input">
                 <div class="uploader-prompt">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                   <span>Haz clic para adjuntar fotografía o scan del examen</span>
@@ -1175,7 +1175,7 @@
             <div class="form-group">
               <label>Evidencias del Progreso (Fotos de apuntes / Ejercicios resueltos)</label>
               <div class="file-uploader-box">
-                <input type="file" id="learningFormFiles" multiple accept="image/*,.pdf" class="file-hidden-input">
+                <input type="file" id="learningFormFiles" multiple accept=".png,.jpg,.jpeg,.webp,.pdf" class="file-hidden-input">
                 <div class="uploader-prompt">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                   <span>Haz clic para adjuntar imágenes de tu avance</span>
@@ -1314,6 +1314,6 @@
   <script src="js/demo-data.js"></script>
 
   <!-- Script principal de la aplicación -->
-  <script src="js/app.js?v=4.2"></script>
+  <script src="js/app.js?v=4.4"></script>
 </body>
 </html>
